@@ -1,0 +1,933 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Proxy Simulation Manager</title>
+    <style>
+      :root {
+        --bg: #f4f1ea;
+        --panel: #fffdf8;
+        --ink: #1f2228;
+        --muted: #6f737d;
+        --line: #d9d0c1;
+        --accent: #0d7a64;
+        --danger: #c84235;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        height: 100vh;
+        overflow: hidden;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 20% -10%, #d9e9e4 0, transparent 35%),
+          radial-gradient(circle at 100% 10%, #f0dfc4 0, transparent 30%),
+          var(--bg);
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+      }
+      .page {
+        width: 100%;
+        height: 100vh;
+        margin: 0;
+        padding: 24px 16px 52px;
+        overflow-y: auto;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 30px;
+      }
+      .sub {
+        color: var(--muted);
+        margin: 0 0 20px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .panel-header h3 {
+        margin: 0;
+      }
+      .panel-toggle {
+        width: auto;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: #344157;
+        font-size: 12px;
+      }
+      .panel-body.is-collapsed {
+        display: none;
+      }
+      #simForm {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(9, minmax(0, 1fr));
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 5px;
+      }
+      input,
+      select,
+      button {
+        width: 100%;
+        border: 1px solid #b7b1a4;
+        border-radius: 8px;
+        padding: 9px 10px;
+        font-size: 14px;
+      }
+      button {
+        cursor: pointer;
+        border-color: transparent;
+        background: var(--accent);
+        color: #fff;
+      }
+      button.alt {
+        background: #323b4e;
+      }
+      button.copy {
+        background: #2e6b9a;
+      }
+      button.warn {
+        background: var(--danger);
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      .field-name {
+        grid-column: 1 / 4;
+        grid-row: 1;
+      }
+      .field-simulate-url {
+        grid-column: 4 / 10;
+        grid-row: 1;
+      }
+      .field-url-type {
+        grid-column: 1 / 2;
+        grid-row: 2;
+      }
+      .field-port {
+        grid-column: 2 / 3;
+        grid-row: 2;
+      }
+      .field-error-code {
+        grid-column: 3 / 4;
+        grid-row: 2;
+      }
+      .field-error-message {
+        grid-column: 4 / 10;
+        grid-row: 2;
+      }
+      .compact-input {
+        max-width: 180px;
+      }
+      .compact-select {
+        max-width: 140px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .form-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-start;
+      }
+      .form-actions button {
+        width: auto;
+        min-width: 170px;
+      }
+      #formError {
+        color: var(--danger);
+        margin-top: 8px;
+        min-height: 18px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+        padding: 9px 8px;
+        font-size: 13px;
+      }
+      td.actions {
+        display: flex;
+        gap: 6px;
+      }
+      td.actions button {
+        width: auto;
+      }
+      #logs {
+        height: 260px;
+        overflow: auto;
+        background: #181a1f;
+        color: #e9edf3;
+        border-radius: 10px;
+        border: 1px solid #2a2d35;
+        padding: 10px;
+        font-family: "JetBrains Mono", Consolas, monospace;
+        font-size: 12px;
+      }
+      .line {
+        white-space: pre-wrap;
+      }
+      .terminal-grid {
+        display: grid;
+        grid-template-columns: repeat(var(--terminal-cols, 2), minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .terminal-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .terminal-toolbar-left {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .terminal-size-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .terminal-size-controls button {
+        width: auto;
+        min-width: 26px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 1;
+        background: #4a5768;
+      }
+      .layout-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .layout-controls button {
+        width: auto;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        background: #4a5768;
+      }
+      .layout-controls button.is-active {
+        background: #0d7a64;
+      }
+      .terminal-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #121419;
+      }
+      .terminal-head {
+        color: #dde3ec;
+        background: #222732;
+        border-bottom: 1px solid #2f3542;
+        padding: 8px 10px;
+        border-radius: 10px 10px 0 0;
+        font-family: "JetBrains Mono", Consolas, monospace;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .terminal-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .terminal-clear {
+        width: auto;
+        padding: 3px 7px;
+        font-size: 11px;
+        border-radius: 6px;
+        background: #8f3a2f;
+      }
+      .terminal-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .terminal-actions button {
+        width: auto;
+        padding: 3px 7px;
+        font-size: 11px;
+        border-radius: 6px;
+      }
+      .terminal-actions .btn-down {
+        background: #c84235;
+      }
+      .terminal-actions .btn-up {
+        background: #0d7a64;
+      }
+      .terminal-actions .btn-delete {
+        background: #323b4e;
+      }
+      .terminal-actions .btn-copy {
+        background: #2e6b9a;
+      }
+      .show-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .show-toggle input {
+        width: auto;
+      }
+      .terminal-body {
+        height: var(--terminal-height, 210px);
+        overflow: auto;
+        padding: 10px;
+        color: #e9edf3;
+        font-family: "JetBrains Mono", Consolas, monospace;
+        font-size: 12px;
+      }
+      .terminal-empty {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .footer-note {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin: 0;
+        padding: 10px 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
+        background: var(--bg);
+        z-index: 20;
+      }
+      .footer-note a {
+        color: inherit;
+        text-decoration: none;
+      }
+      @media (max-width: 780px) {
+        #simForm {
+          grid-template-columns: 1fr;
+        }
+        .field-name,
+        .field-url-type,
+        .field-port,
+        .field-simulate-url,
+        .field-error-code,
+        .field-error-message {
+          grid-column: 1;
+        }
+        .compact-input,
+        .compact-select {
+          max-width: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Proxy Simulation Manager</h1>
+      <p class="sub">Create multiple HTTP/WS simulations, control break/fix, and tail runtime logs.</p>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Create Simulation</h3>
+          <button type="button" class="panel-toggle" data-panel-toggle="createPanelBody">Minimize</button>
+        </div>
+        <div id="createPanelBody" class="panel-body">
+          <form id="simForm">
+          <div class="field-name">
+            <label for="name">Name (optional)</label>
+            <input id="name" type="text" placeholder="my-eth-http-sim" />
+          </div>
+
+          <div class="field-url-type">
+            <label for="urlType">URL Type</label>
+            <select id="urlType" class="compact-select" required>
+              <option value="http">http</option>
+              <option value="ws">ws</option>
+            </select>
+          </div>
+
+          <div class="field-port">
+            <label for="port">Port</label>
+            <input id="port" class="compact-input" type="number" min="1000" max="65535" required />
+            <div class="hint">Valid TCP range here is 1000-65535.</div>
+          </div>
+
+          <div class="field-simulate-url">
+            <label for="simulateUrl">Live URL</label>
+            <input id="simulateUrl" type="text" placeholder="https://rpc-testnet.supra.com or wss://..." required />
+          </div>
+
+          <div class="field-error-code">
+            <label for="errorCode">Error Status Code (optional)</label>
+            <input id="errorCode" class="compact-input" type="number" min="1" value="500" />
+          </div>
+
+          <div class="field-error-message">
+            <label for="errorMessage">Error Message</label>
+            <input id="errorMessage" type="text" value="Service unavailable (simulated)" />
+          </div>
+
+          <div class="full form-actions">
+            <button class="alt" id="suggestBtn" type="button">Suggest Free Port</button>
+            <button type="submit">Create Simulation</button>
+          </div>
+          </form>
+          <div id="formError"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 14px">
+        <div class="panel-header">
+          <h3>Running Simulations</h3>
+          <button type="button" class="panel-toggle" data-panel-toggle="runningPanelBody">Minimize</button>
+        </div>
+        <div id="runningPanelBody" class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Port</th>
+                <th>Simulated Endpoint</th>
+                <th>Live URL</th>
+                <th>State</th>
+                <th>PID</th>
+                <th>
+                  <span class="show-toggle">
+                    <input id="toggleAllTerminals" type="checkbox" title="Select/Unselect all terminals" />
+                    Show terminal
+                  </span>
+                </th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="simRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 14px">
+        <div class="panel-header">
+          <div class="terminal-toolbar-left">
+
+            <h3>Terminal Views</h3>
+            <div class="terminal-size-controls">
+              <button type="button" id="terminalHeightDec" title="Decrease terminal height">-</button>
+              <span>Terminal Height</span>
+              <button type="button" id="terminalHeightInc" title="Increase terminal height">+</button>
+            </div>
+          </div>
+          <button type="button" class="panel-toggle" data-panel-toggle="terminalPanelBody">Minimize</button>
+        </div>
+        <div id="terminalPanelBody" class="panel-body">
+          <div class="terminal-toolbar">
+            <div></div>
+            <div class="layout-controls">
+              <span>Grid:</span>
+              <button type="button" data-cols="1">Single</button>
+              <button type="button" data-cols="2">Double</button>
+              <button type="button" data-cols="3">Triple</button>
+              <button type="button" data-cols="4">Four</button>
+            </div>
+          </div>
+          <div id="terminalDeck" class="terminal-grid"></div>
+        </div>
+      </div>
+      <p class="footer-note">
+        Copyright &copy; 2026
+        <strong>
+          <a href="https://www.linkedin.com/in/jaykumar-gohil-298068183/" target="_blank" rel="noopener noreferrer">Gohil Jaykumar</a>
+        </strong>.
+        Developed in India.
+      </p>
+    </div>
+
+    <script>
+      const form = document.getElementById("simForm");
+      const rows = document.getElementById("simRows");
+      const formError = document.getElementById("formError");
+      const portInput = document.getElementById("port");
+      const nameInput = document.getElementById("name");
+      const suggestBtn = document.getElementById("suggestBtn");
+      const terminalDeck = document.getElementById("terminalDeck");
+      const toggleAllTerminals = document.getElementById("toggleAllTerminals");
+      const terminalHeightDec = document.getElementById("terminalHeightDec");
+      const terminalHeightInc = document.getElementById("terminalHeightInc");
+      const panelToggles = document.querySelectorAll("[data-panel-toggle]");
+      const layoutButtons = document.querySelectorAll(".layout-controls button[data-cols]");
+      const params = new URLSearchParams(window.location.search);
+      const isAdmin = params.get("role") === "admin";
+      const userStorageKey = "proxy_sim_user_id";
+      const nameCounterStorageKey = "proxy_sim_name_counter";
+      const terminalSelectionStorageKeyBase = "proxy_sim_checked_terminals";
+      const terminalColsStorageKey = "proxy_sim_terminal_cols";
+      const panelStateStorageKey = "proxy_sim_panel_state";
+      const terminalHeightStorageKeyBase = "proxy_sim_terminal_height";
+      const checkedTerminalIds = [];
+      const terminalBuffers = new Map();
+      let simulationsById = new Map();
+
+      function getOrCreateUserId() {
+        if (isAdmin) return "admin";
+        let existing = localStorage.getItem(userStorageKey);
+        if (existing) return existing;
+
+        if (window.crypto && window.crypto.randomUUID) {
+          existing = window.crypto.randomUUID();
+        } else {
+          existing = `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        }
+        localStorage.setItem(userStorageKey, existing);
+        return existing;
+      }
+
+      const userId = getOrCreateUserId();
+      const terminalSelectionStorageKey = `${terminalSelectionStorageKeyBase}_${isAdmin ? "admin" : userId}`;
+      const terminalHeightStorageKey = `${terminalHeightStorageKeyBase}_${isAdmin ? "admin" : userId}`;
+
+      async function api(path, options) {
+        const url = new URL(path, window.location.origin);
+        if (isAdmin) url.searchParams.set("role", "admin");
+
+        const fetchOptions = options ? { ...options } : {};
+        fetchOptions.headers = fetchOptions.headers ? { ...fetchOptions.headers } : {};
+        if (!isAdmin) fetchOptions.headers["x-user-id"] = userId;
+
+        const response = await fetch(url.toString(), fetchOptions);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw body;
+        return body;
+      }
+
+      function nextSimulationName() {
+        const current = Number(localStorage.getItem(nameCounterStorageKey) || "0");
+        const next = Number.isFinite(current) ? current + 1 : 1;
+        localStorage.setItem(nameCounterStorageKey, String(next));
+        return `Simulation-${next}`;
+      }
+
+      async function applyDefaultPort(from = 1000) {
+        const result = await api(`/api/ports/suggest?from=${from}`);
+        portInput.value = result.suggested_port;
+      }
+
+      async function applyFormDefaults() {
+        nameInput.value = nextSimulationName();
+        await applyDefaultPort(1000);
+      }
+
+      function setTerminalColumns(cols) {
+        const value = [1, 2, 3, 4].includes(cols) ? cols : 2;
+        document.documentElement.style.setProperty("--terminal-cols", String(value));
+        for (const button of layoutButtons) {
+          button.classList.toggle("is-active", Number(button.dataset.cols) === value);
+        }
+        localStorage.setItem(terminalColsStorageKey, String(value));
+      }
+
+      function setTerminalHeight(height) {
+        const clamped = Math.max(120, Math.min(720, Number(height) || 210));
+        document.documentElement.style.setProperty("--terminal-height", `${clamped}px`);
+        localStorage.setItem(terminalHeightStorageKey, String(clamped));
+      }
+
+      function adjustTerminalHeight(delta) {
+        const current = Number(localStorage.getItem(terminalHeightStorageKey) || "210");
+        setTerminalHeight(current + delta);
+      }
+
+      function saveCheckedTerminalIds() {
+        localStorage.setItem(terminalSelectionStorageKey, JSON.stringify(checkedTerminalIds));
+      }
+
+      function loadPanelState() {
+        const raw = localStorage.getItem(panelStateStorageKey);
+        if (!raw) return {};
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function savePanelState(panelState) {
+        localStorage.setItem(panelStateStorageKey, JSON.stringify(panelState));
+      }
+
+      function loadCheckedTerminalIds() {
+        const raw = localStorage.getItem(terminalSelectionStorageKey);
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return;
+          checkedTerminalIds.splice(0, checkedTerminalIds.length, ...parsed.map(String));
+        } catch {
+          // ignore invalid persisted values
+        }
+      }
+
+      function updateSelectAllState() {
+        const total = simulationsById.size;
+        if (!total) {
+          toggleAllTerminals.checked = false;
+          toggleAllTerminals.indeterminate = false;
+          return;
+        }
+
+        let selectedCount = 0;
+        for (const id of simulationsById.keys()) {
+          if (checkedTerminalIds.includes(id)) selectedCount += 1;
+        }
+
+        toggleAllTerminals.checked = selectedCount === total;
+        toggleAllTerminals.indeterminate = selectedCount > 0 && selectedCount < total;
+      }
+
+      function renderTerminalDeck() {
+        terminalDeck.innerHTML = "";
+
+        if (!checkedTerminalIds.length) {
+          const empty = document.createElement("div");
+          empty.className = "terminal-empty";
+          empty.textContent = "Check 'Show terminal' for a simulation to see its logs.";
+          terminalDeck.appendChild(empty);
+          return;
+        }
+
+        for (const simId of checkedTerminalIds) {
+          const sim = simulationsById.get(simId);
+          if (!sim) continue;
+
+          const card = document.createElement("div");
+          card.className = "terminal-card";
+
+          const head = document.createElement("div");
+          head.className = "terminal-head";
+          const title = document.createElement("span");
+          title.className = "terminal-title";
+          title.textContent = `${sim.id} | ${sim.name} | ${sim.endpoint}`;
+          const actionWrap = document.createElement("div");
+          actionWrap.className = "terminal-actions";
+
+          const copyBtn = document.createElement("button");
+          copyBtn.className = "btn-copy";
+          copyBtn.textContent = "Copy";
+          copyBtn.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(sim.endpoint);
+            } catch {
+              // ignore clipboard failures
+            }
+          });
+
+          const downBtn = document.createElement("button");
+          downBtn.className = "btn-down";
+          downBtn.textContent = "Down";
+          downBtn.addEventListener("click", async () => {
+            try {
+              await api(`/api/simulations/${sim.id}/down`, { method: "POST" });
+              await render();
+            } catch {
+              // ignore inline action errors
+            }
+          });
+
+          const upBtn = document.createElement("button");
+          upBtn.className = "btn-up";
+          upBtn.textContent = "Up";
+          upBtn.addEventListener("click", async () => {
+            try {
+              await api(`/api/simulations/${sim.id}/up`, { method: "POST" });
+              await render();
+            } catch {
+              // ignore inline action errors
+            }
+          });
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "btn-delete";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.addEventListener("click", async () => {
+            try {
+              await api(`/api/simulations/${sim.id}`, { method: "DELETE" });
+              await render();
+            } catch {
+              // ignore inline action errors
+            }
+          });
+
+          const clearBtn = document.createElement("button");
+          clearBtn.className = "terminal-clear";
+          clearBtn.textContent = "clear-logs";
+          clearBtn.addEventListener("click", () => {
+            terminalBuffers.set(simId, []);
+            renderTerminalDeck();
+          });
+
+          actionWrap.appendChild(copyBtn);
+          actionWrap.appendChild(downBtn);
+          actionWrap.appendChild(upBtn);
+          actionWrap.appendChild(deleteBtn);
+          actionWrap.appendChild(clearBtn);
+          head.appendChild(title);
+          head.appendChild(actionWrap);
+
+          const body = document.createElement("div");
+          body.className = "terminal-body";
+
+          const entries = terminalBuffers.get(simId) || [];
+          for (const entry of entries) {
+            const line = document.createElement("div");
+            line.className = "line";
+            line.textContent = `[${entry.at}] [${entry.stream}] ${entry.line}`;
+            body.appendChild(line);
+          }
+          requestAnimationFrame(() => {
+            body.scrollTop = body.scrollHeight;
+          });
+
+          card.appendChild(head);
+          card.appendChild(body);
+          terminalDeck.appendChild(card);
+        }
+      }
+
+      function addLog(entry) {
+        if (!checkedTerminalIds.includes(entry.id)) return;
+        const entries = terminalBuffers.get(entry.id) || [];
+        entries.push(entry);
+        if (entries.length > 300) entries.shift();
+        terminalBuffers.set(entry.id, entries);
+        renderTerminalDeck();
+      }
+
+      function actionButton(text, className, fn) {
+        const btn = document.createElement("button");
+        btn.textContent = text;
+        if (className) btn.className = className;
+        btn.onclick = fn;
+        return btn;
+      }
+
+      async function render() {
+        const items = await api("/api/simulations");
+        simulationsById = new Map(items.map((sim) => [sim.id, sim]));
+        rows.innerHTML = "";
+
+        for (let i = checkedTerminalIds.length - 1; i >= 0; i -= 1) {
+          const id = checkedTerminalIds[i];
+          if (!simulationsById.has(id)) {
+            checkedTerminalIds.splice(i, 1);
+            terminalBuffers.delete(id);
+          }
+        }
+        for (const id of checkedTerminalIds) {
+          if (!terminalBuffers.has(id)) {
+            const sim = simulationsById.get(id);
+            if (sim) terminalBuffers.set(id, (sim.logs || []).slice(-300));
+          }
+        }
+        saveCheckedTerminalIds();
+
+        for (const sim of items) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${sim.id}</td>
+            <td>${sim.name}</td>
+            <td>${sim.urlType}</td>
+            <td>${sim.port}</td>
+            <td title="${sim.endpoint}">${sim.endpoint}</td>
+            <td title="${sim.simulateUrl}">${sim.simulateUrl.slice(0, 50)}</td>
+            <td>${sim.state}</td>
+            <td>${sim.pid ?? "-"}</td>
+            <td class="show-cell"></td>
+            <td class="actions"></td>
+          `;
+
+          const showCell = tr.querySelector("td.show-cell");
+          const actionCell = tr.querySelector("td.actions");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.style.width = "auto";
+          checkbox.checked = checkedTerminalIds.includes(sim.id);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+              if (!checkedTerminalIds.includes(sim.id)) checkedTerminalIds.push(sim.id);
+              if (!terminalBuffers.has(sim.id)) terminalBuffers.set(sim.id, (sim.logs || []).slice(-300));
+            } else {
+              const idx = checkedTerminalIds.indexOf(sim.id);
+              if (idx >= 0) checkedTerminalIds.splice(idx, 1);
+              terminalBuffers.delete(sim.id);
+            }
+            saveCheckedTerminalIds();
+            updateSelectAllState();
+            renderTerminalDeck();
+          });
+          showCell.appendChild(checkbox);
+
+          actionCell.appendChild(
+            actionButton("Copy", "copy", async () => {
+              await navigator.clipboard.writeText(sim.endpoint);
+            }),
+          );
+
+          actionCell.appendChild(
+            actionButton("Down", "warn", async () => {
+              await api(`/api/simulations/${sim.id}/down`, { method: "POST" });
+              render();
+            }),
+          );
+
+          actionCell.appendChild(
+            actionButton("Up", "", async () => {
+              await api(`/api/simulations/${sim.id}/up`, { method: "POST" });
+              render();
+            }),
+          );
+
+          actionCell.appendChild(
+            actionButton("Delete", "alt", async () => {
+              await api(`/api/simulations/${sim.id}`, { method: "DELETE" });
+              render();
+            }),
+          );
+
+          rows.appendChild(tr);
+        }
+        updateSelectAllState();
+        renderTerminalDeck();
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        formError.textContent = "";
+
+        const payload = {
+          name: document.getElementById("name").value,
+          url_type: document.getElementById("urlType").value,
+          port: Number(document.getElementById("port").value),
+          simulate_url: document.getElementById("simulateUrl").value,
+          error_status_code: Number(document.getElementById("errorCode").value || 500),
+          error_response_message: document.getElementById("errorMessage").value,
+        };
+
+        try {
+          const created = await api("/api/simulations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (created && created.id && !checkedTerminalIds.includes(created.id)) {
+            checkedTerminalIds.push(created.id);
+          }
+          if (created && created.id && !terminalBuffers.has(created.id)) {
+            terminalBuffers.set(created.id, (created.logs || []).slice(-300));
+          }
+          saveCheckedTerminalIds();
+          await render();
+          form.reset();
+          document.getElementById("errorCode").value = "500";
+          document.getElementById("errorMessage").value = "Service unavailable (simulated)";
+          await applyFormDefaults();
+        } catch (err) {
+          const suggested = err.suggested_port ? ` Suggested free port: ${err.suggested_port}` : "";
+          formError.textContent = `${err.error || "Failed to create simulation"}.${suggested}`;
+        }
+      });
+
+      suggestBtn.addEventListener("click", async () => {
+        portInput.value = "";
+        await applyDefaultPort(1000);
+      });
+
+      toggleAllTerminals.addEventListener("change", () => {
+        if (toggleAllTerminals.checked) {
+          for (const id of simulationsById.keys()) {
+            if (!checkedTerminalIds.includes(id)) checkedTerminalIds.push(id);
+            if (!terminalBuffers.has(id)) {
+              const sim = simulationsById.get(id);
+              terminalBuffers.set(id, (sim && sim.logs ? sim.logs : []).slice(-300));
+            }
+          }
+        } else {
+          checkedTerminalIds.splice(0, checkedTerminalIds.length);
+          terminalBuffers.clear();
+        }
+        saveCheckedTerminalIds();
+        updateSelectAllState();
+        render();
+      });
+
+      for (const button of layoutButtons) {
+        button.addEventListener("click", () => {
+          setTerminalColumns(Number(button.dataset.cols));
+        });
+      }
+
+      terminalHeightDec.addEventListener("click", () => adjustTerminalHeight(-30));
+      terminalHeightInc.addEventListener("click", () => adjustTerminalHeight(30));
+
+      const panelState = loadPanelState();
+      for (const toggle of panelToggles) {
+        const panelBodyId = toggle.dataset.panelToggle;
+        const panelBody = document.getElementById(panelBodyId);
+        if (!panelBody) continue;
+
+        if (panelState[panelBodyId]) {
+          panelBody.classList.add("is-collapsed");
+          toggle.textContent = "Expand";
+        } else {
+          toggle.textContent = "Minimize";
+        }
+
+        toggle.addEventListener("click", () => {
+          const collapsed = panelBody.classList.toggle("is-collapsed");
+          toggle.textContent = collapsed ? "Expand" : "Minimize";
+          panelState[panelBodyId] = collapsed;
+          savePanelState(panelState);
+        });
+      }
+
+      const streamUrl = isAdmin
+        ? "/api/logs/stream?role=admin"
+        : `/api/logs/stream?user_id=${encodeURIComponent(userId)}`;
+      const stream = new EventSource(streamUrl);
+      stream.onmessage = (event) => addLog(JSON.parse(event.data));
+
+      setTerminalColumns(Number(localStorage.getItem(terminalColsStorageKey) || "2"));
+      setTerminalHeight(Number(localStorage.getItem(terminalHeightStorageKey) || "210"));
+      loadCheckedTerminalIds();
+      applyFormDefaults();
+      render();
+      setInterval(render, 3000);
+    </script>
+  </body>
+</html>

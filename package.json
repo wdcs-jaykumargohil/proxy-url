@@ -1,0 +1,18 @@
+{
+  "name": "proxy-url",
+  "version": "1.0.0",
+  "main": "rpc_proxy.js",
+  "scripts": {
+    "start": "node manager_server.js",
+    "start:manager": "node manager_server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5",
+    "ws": "^8.18.3"
+  }
+}
