@@ -526,6 +526,20 @@
         return body;
       }
 
+      function getSimulatedEndpoint(sim) {
+        const original = sim.endpoint || "";
+        if (!original) return "";
+
+        const secureProtocol = sim.urlType === "ws" ? "wss:" : "https:";
+        try {
+          const parsed = new URL(original);
+          parsed.protocol = secureProtocol;
+          return parsed.toString().replace(/\/$/, "");
+        } catch {
+          return original.replace(/^(http:|ws:)/i, secureProtocol).replace(/\/$/, "");
+        }
+      }
+
       function nextSimulationName() {
         const current = Number(localStorage.getItem(nameCounterStorageKey) || "0");
         const next = Number.isFinite(current) ? current + 1 : 1;
@@ -633,7 +647,7 @@
           head.className = "terminal-head";
           const title = document.createElement("span");
           title.className = "terminal-title";
-          title.textContent = `${sim.id} | ${sim.name} | ${sim.endpoint}`;
+          title.textContent = `${sim.id} | ${sim.name} | ${getSimulatedEndpoint(sim)}`;
           const actionWrap = document.createElement("div");
           actionWrap.className = "terminal-actions";
 
@@ -642,7 +656,7 @@
           copyBtn.textContent = "Copy";
           copyBtn.addEventListener("click", async () => {
             try {
-              await navigator.clipboard.writeText(sim.endpoint);
+              await navigator.clipboard.writeText(getSimulatedEndpoint(sim));
             } catch {
               // ignore clipboard failures
             }
@@ -764,7 +778,7 @@
             <td>${sim.name}</td>
             <td>${sim.urlType}</td>
             <td>${sim.port}</td>
-            <td title="${sim.endpoint}">${sim.endpoint}</td>
+            <td title="${getSimulatedEndpoint(sim)}">${getSimulatedEndpoint(sim)}</td>
             <td title="${sim.simulateUrl}">${sim.simulateUrl.slice(0, 50)}</td>
             <td>${sim.state}</td>
             <td>${sim.pid ?? "-"}</td>
@@ -795,7 +809,7 @@
 
           actionCell.appendChild(
             actionButton("Copy", "copy", async () => {
-              await navigator.clipboard.writeText(sim.endpoint);
+              await navigator.clipboard.writeText(getSimulatedEndpoint(sim));
             }),
           );
 
