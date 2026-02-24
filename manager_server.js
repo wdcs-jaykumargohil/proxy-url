@@ -3,10 +3,7 @@ const path = require("path");
 const net = require("net");
 const os = require("os");
 const { spawn } = require("child_process");
-const {
-  createProxyMiddleware,
-  responseInterceptor,
-} = require("http-proxy-middleware");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
 const PORT = process.env.MANAGER_PORT ? Number(process.env.MANAGER_PORT) : 9090;
@@ -453,62 +450,11 @@ function getProxyTarget(req) {
   return `http://127.0.0.1:${sim.port}`;
 }
 
-function getProxyPathPrefix(req) {
-  const requestedPort = Number(req.params.port);
-  if (!Number.isInteger(requestedPort)) return "";
-  return `/proxy/${requestedPort}`;
-}
-
-function rewriteLocationHeader(locationValue, req) {
-  if (!locationValue) return locationValue;
-  const prefix = getProxyPathPrefix(req);
-  if (!prefix) return locationValue;
-  if (locationValue.startsWith(prefix)) return locationValue;
-  if (locationValue.startsWith("http://") || locationValue.startsWith("https://")) {
-    return locationValue;
-  }
-  if (locationValue.startsWith("/")) return `${prefix}${locationValue}`;
-  return `${prefix}/${locationValue}`;
-}
-
-function rewriteWebsiteBody(content, req) {
-  const prefix = getProxyPathPrefix(req);
-  if (!prefix) return content;
-
-  let updated = content;
-  updated = updated.replace(
-    /((?:href|src|action)=["'])\/(?!\/)/gi,
-    `$1${prefix}/`,
-  );
-  updated = updated.replace(
-    /(url\(["']?)\/(?!\/)/gi,
-    `$1${prefix}/`,
-  );
-  updated = updated.replace(
-    /(fetch\(["'])\/(?!\/)/gi,
-    `$1${prefix}/`,
-  );
-  return updated;
-}
-
 const simulationProxy = createProxyMiddleware({
   changeOrigin: true,
   secure: false,
   ws: true,
-  selfHandleResponse: true,
   router: getProxyTarget,
-  onProxyRes: responseInterceptor(async (buffer, proxyRes, req) => {
-    if (proxyRes.headers.location) {
-      proxyRes.headers.location = rewriteLocationHeader(proxyRes.headers.location, req);
-    }
-
-    const contentType = String(proxyRes.headers["content-type"] || "").toLowerCase();
-    if (contentType.includes("text/html") || contentType.includes("text/css")) {
-      const text = buffer.toString("utf8");
-      return rewriteWebsiteBody(text, req);
-    }
-    return buffer;
-  }),
   onError(err, req, res) {
     console.error("Proxy route error:", err.message);
     if (res && !res.headersSent) {
