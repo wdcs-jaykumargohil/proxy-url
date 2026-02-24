@@ -12,7 +12,7 @@ const MIN_PORT = 1000;
 const MAX_PORT = 65535;
 const DEFAULT_ERROR_STATUS = 500;
 const DEFAULT_ERROR_MESSAGE = "Service unavailable (simulated)";
-const DEFAULT_MAX_REQUESTS_PER_SECOND = 10;
+const DEFAULT_MAX_REQUESTS_PER_SECOND = 15;
 
 const simulations = new Map();
 const logClients = new Set();
