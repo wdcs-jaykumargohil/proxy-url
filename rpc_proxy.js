@@ -44,13 +44,14 @@ function isRateLimited() {
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
+  const requestedHeaders = req.headers["access-control-request-headers"];
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-User-Id",
+    requestedHeaders || "Content-Type, Authorization, X-User-Id",
   );
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
   );
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
