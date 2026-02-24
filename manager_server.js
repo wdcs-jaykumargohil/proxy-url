@@ -491,10 +491,36 @@ function rewriteWebsiteBody(content, req) {
   return updated;
 }
 
-const simulationProxy = createProxyMiddleware({
+function shouldRewriteWebsiteResponse(req) {
+  if (req.method !== "GET") return false;
+  const accept = String(req.headers.accept || "").toLowerCase();
+  if (accept.includes("text/html")) return true;
+  const pathname = String(req.path || "").toLowerCase();
+  return pathname.endsWith(".css");
+}
+
+const simulationStreamProxy = createProxyMiddleware({
   changeOrigin: true,
   secure: false,
   ws: true,
+  router: getProxyTarget,
+  onProxyRes(proxyRes, req) {
+    if (proxyRes.headers.location) {
+      proxyRes.headers.location = rewriteLocationHeader(proxyRes.headers.location, req);
+    }
+  },
+  onError(err, req, res) {
+    console.error("Proxy route error:", err.message);
+    if (res && !res.headersSent) {
+      res.status(502).json({ error: "Proxy forwarding failed" });
+    }
+  },
+});
+
+const simulationRewriteProxy = createProxyMiddleware({
+  changeOrigin: true,
+  secure: false,
+  ws: false,
   selfHandleResponse: true,
   router: getProxyTarget,
   onProxyRes: responseInterceptor(async (buffer, proxyRes, req) => {
@@ -534,7 +560,10 @@ app.use("/proxy/:port", (req, res, next) => {
   if (sim.state === "stopped") {
     return res.status(503).json({ error: "Simulation is not running" });
   }
-  return simulationProxy(req, res, next);
+  if (shouldRewriteWebsiteResponse(req)) {
+    return simulationRewriteProxy(req, res, next);
+  }
+  return simulationStreamProxy(req, res, next);
 });
 
 const server = app.listen(PORT, () => {
@@ -564,5 +593,5 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   req.params = { port: String(requestedPort) };
-  simulationProxy.upgrade(req, socket, head);
+  simulationStreamProxy.upgrade(req, socket, head);
 });
