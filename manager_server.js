@@ -11,12 +11,30 @@ const MIN_PORT = 1000;
 const MAX_PORT = 65535;
 const DEFAULT_ERROR_STATUS = 500;
 const DEFAULT_ERROR_MESSAGE = "Service unavailable (simulated)";
+const DEFAULT_MAX_REQUESTS_PER_SECOND = 5;
 
 const simulations = new Map();
 const logClients = new Set();
 let seq = 1;
 
 app.use(express.json());
+
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-User-Id",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  return next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 function getExposedIp() {
@@ -90,6 +108,7 @@ function simulationToJson(sim) {
     simulateUrl: sim.simulateUrl,
     errorStatusCode: sim.errorStatusCode,
     errorResponseMessage: sim.errorResponseMessage,
+    maxRequestsPerSecond: sim.maxRequestsPerSecond,
     state: sim.state,
     pid: sim.process ? sim.process.pid : null,
     createdAt: sim.createdAt,
@@ -112,6 +131,15 @@ function parseErrorCode(value) {
   const code = Number(value);
   if (!Number.isInteger(code) || code <= 0) return null;
   return code;
+}
+
+function parseMaxRequestsPerSecond(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_MAX_REQUESTS_PER_SECOND;
+  }
+  const rate = Number(value);
+  if (!Number.isInteger(rate) || rate <= 0) return null;
+  return rate;
 }
 
 async function isPortFree(port) {
@@ -149,6 +177,7 @@ function startSimulation(sim) {
     sim.simulateUrl,
     String(sim.errorStatusCode),
     sim.errorResponseMessage,
+    String(sim.maxRequestsPerSecond),
   ];
 
   const child = spawn("node", args, {
@@ -218,6 +247,9 @@ app.post("/api/simulations", async (req, res) => {
   const errorResponseMessage = req.body.error_response_message
     ? String(req.body.error_response_message)
     : DEFAULT_ERROR_MESSAGE;
+  const maxRequestsPerSecond = parseMaxRequestsPerSecond(
+    req.body.max_requests_per_second ?? req.body.max_throughput_rps,
+  );
 
   if (!["http", "ws"].includes(urlType)) {
     return res.status(400).json({ error: "url_type must be 'http' or 'ws'" });
@@ -243,6 +275,12 @@ app.post("/api/simulations", async (req, res) => {
       .json({ error: "error_status_code must be an integer greater than 0" });
   }
 
+  if (maxRequestsPerSecond === null) {
+    return res.status(400).json({
+      error: "max_requests_per_second must be an integer greater than 0",
+    });
+  }
+
   const free = await isPortFree(port);
   if (!free) {
     const suggested = await findFreePort(port + 1);
@@ -266,6 +304,7 @@ app.post("/api/simulations", async (req, res) => {
     simulateUrl,
     errorStatusCode,
     errorResponseMessage,
+    maxRequestsPerSecond,
     state: "starting",
     process: null,
     logs: [],

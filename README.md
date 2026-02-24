@@ -24,6 +24,18 @@ Manager UI/API default URL:
 http://localhost:9090
 ```
 
+## Rate Limit Per Simulated Endpoint
+
+New simulations now default to a max throughput of `3` requests per second per endpoint.
+
+When creating a simulation via API, you can override it with:
+
+- `max_requests_per_second` (integer > 0)
+
+## CORS
+
+To avoid browser CORS issues in deployment, manager API and HTTP simulated endpoints now allow all origins by default.
+
 ## Docker
 
 Build image:

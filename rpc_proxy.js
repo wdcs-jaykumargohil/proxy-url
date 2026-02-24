@@ -14,6 +14,8 @@ const ERROR_RESPONSE_MESSAGE =
   process.argv[5] && process.argv[5].trim()
     ? process.argv[5]
     : "Service unavailable (simulated)";
+const MAX_REQUESTS_PER_SECOND =
+  process.argv[6] && Number(process.argv[6]) > 0 ? Number(process.argv[6]) : 3;
 
 if (!TARGET_URL) {
   console.error("❌ Please provide a target RPC URL.");
@@ -26,8 +28,43 @@ if (!TARGET_URL) {
 // Optional: simulate break/fix
 // ------------------------
 let isBroken = false;
+let windowStartMs = Date.now();
+let requestCountInWindow = 0;
+
+function isRateLimited() {
+  const now = Date.now();
+  if (now - windowStartMs >= 1000) {
+    windowStartMs = now;
+    requestCountInWindow = 0;
+  }
+  requestCountInWindow += 1;
+  return requestCountInWindow > MAX_REQUESTS_PER_SECOND;
+}
 
 app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-User-Id",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  return next();
+});
+
+app.use((req, res, next) => {
+  if (isRateLimited()) {
+    res.set("Retry-After", "1");
+    return res.status(429).json({
+      error: `Rate limit exceeded: max ${MAX_REQUESTS_PER_SECOND} requests/second`,
+    });
+  }
+
   if (isBroken) {
     console.log("🔴 Proxy is DOWN");
     return res.status(ERROR_STATUS_CODE).json({ error: ERROR_RESPONSE_MESSAGE });
@@ -63,6 +100,7 @@ app.listen(PORT, () => {
   // console.log(`➡️ Forwarding to: ${TARGET_URL}`);
   console.log(`⚠️ Simulated error status: ${ERROR_STATUS_CODE}`);
   console.log(`⚠️ Simulated error message: ${ERROR_RESPONSE_MESSAGE}`);
+  console.log(`⚠️ Max throughput: ${MAX_REQUESTS_PER_SECOND} req/s`);
   console.log("Commands: (b) break | (f) fix\n");
 });
 

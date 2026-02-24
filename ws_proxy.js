@@ -14,6 +14,8 @@ const ERROR_RESPONSE_MESSAGE =
   args[3] && String(args[3]).trim()
     ? String(args[3])
     : "Service unavailable (simulated)";
+const MAX_MESSAGES_PER_SECOND =
+  args[4] && Number(args[4]) > 0 ? Number(args[4]) : 3;
 
 if (!UPSTREAM_URL) {
   console.error("Please provide an upstream websocket URL.");
@@ -26,11 +28,24 @@ console.log("⚙️ Using PORT:", LOCAL_PORT);
 console.log("⚙️ Using Upstream URL:", UPSTREAM_URL);
 console.log("⚙️ Simulated status code:", ERROR_STATUS_CODE);
 console.log("⚙️ Simulated error message:", ERROR_RESPONSE_MESSAGE);
+console.log("⚙️ Max throughput (messages/sec):", MAX_MESSAGES_PER_SECOND);
 
 // ------------------------------
 let upstream = null;
 let clients = new Set();
 let allowConnections = true;
+let windowStartMs = Date.now();
+let messageCountInWindow = 0;
+
+function isRateLimited() {
+  const now = Date.now();
+  if (now - windowStartMs >= 1000) {
+    windowStartMs = now;
+    messageCountInWindow = 0;
+  }
+  messageCountInWindow += 1;
+  return messageCountInWindow > MAX_MESSAGES_PER_SECOND;
+}
 
 // LOCAL WS SERVER
 const wss = new WebSocket.Server({ port: LOCAL_PORT });
@@ -54,6 +69,18 @@ wss.on("connection", (client, req) => {
   });
 
   client.on("message", (msg) => {
+    if (isRateLimited()) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({
+            error: `Rate limit exceeded: max ${MAX_MESSAGES_PER_SECOND} messages/second`,
+            code: 429,
+          }),
+        );
+      }
+      return;
+    }
+
     if (upstream && upstream.readyState === WebSocket.OPEN) {
       upstream.send(msg);
     }
