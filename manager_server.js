@@ -3,6 +3,7 @@ const path = require("path");
 const net = require("net");
 const os = require("os");
 const { spawn } = require("child_process");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
 const PORT = process.env.MANAGER_PORT ? Number(process.env.MANAGER_PORT) : 9090;
@@ -53,6 +54,26 @@ function buildEndpoint(sim) {
   return `${scheme}://${getExposedIp()}:${sim.port}`;
 }
 
+function getRequestScheme(req) {
+  const forwardedProto = req?.headers?.["x-forwarded-proto"];
+  if (forwardedProto) return String(forwardedProto).split(",")[0].trim();
+  return req?.protocol || "http";
+}
+
+function getRequestHost(req) {
+  const forwardedHost = req?.headers?.["x-forwarded-host"];
+  if (forwardedHost) return String(forwardedHost).split(",")[0].trim();
+  const host = req?.get?.("host");
+  if (host) return host;
+  return `${getExposedIp()}:${PORT}`;
+}
+
+function buildManagerProxyEndpoint(sim, req) {
+  const scheme = sim.urlType === "ws" && getRequestScheme(req) === "https" ? "wss" : getRequestScheme(req);
+  const host = getRequestHost(req);
+  return `${scheme}://${host}/proxy/${sim.port}`;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -98,7 +119,7 @@ function appendLog(sim, stream, line) {
   broadcastLog(entry);
 }
 
-function simulationToJson(sim) {
+function simulationToJson(sim, req) {
   return {
     id: sim.id,
     name: sim.name,
@@ -113,7 +134,8 @@ function simulationToJson(sim) {
     pid: sim.process ? sim.process.pid : null,
     createdAt: sim.createdAt,
     ownerId: sim.ownerId,
-    endpoint: buildEndpoint(sim),
+    endpoint: buildManagerProxyEndpoint(sim, req),
+    endpointDirect: buildEndpoint(sim),
     logs: sim.logs,
   };
 }
@@ -224,14 +246,14 @@ function sendCommand(sim, command) {
 app.get("/api/simulations", (req, res) => {
   const all = Array.from(simulations.values());
   if (isAdminRequest(req)) {
-    return res.json(all.map(simulationToJson));
+    return res.json(all.map((sim) => simulationToJson(sim, req)));
   }
 
   const userId = getRequestUserId(req);
   if (!userId) return res.json([]);
 
   const filtered = all.filter((sim) => sim.ownerId === userId);
-  return res.json(filtered.map(simulationToJson));
+  return res.json(filtered.map((sim) => simulationToJson(sim, req)));
 });
 
 app.post("/api/simulations", async (req, res) => {
@@ -315,7 +337,7 @@ app.post("/api/simulations", async (req, res) => {
   simulations.set(id, sim);
   startSimulation(sim);
 
-  return res.status(201).json(simulationToJson(sim));
+  return res.status(201).json(simulationToJson(sim, req));
 });
 
 app.post("/api/simulations/:id/down", (req, res) => {
@@ -328,7 +350,7 @@ app.post("/api/simulations/:id/down", (req, res) => {
     sendCommand(sim, "b");
     sim.state = "down";
     // appendLog(sim, "system", "command sent: b (DOWN)");
-    return res.json(simulationToJson(sim));
+    return res.json(simulationToJson(sim, req));
   } catch (err) {
     return res.status(409).json({ error: err.message });
   }
@@ -344,7 +366,7 @@ app.post("/api/simulations/:id/up", (req, res) => {
     sendCommand(sim, "f");
     sim.state = "up";
     // appendLog(sim, "system", "command sent: f (UP)");
-    return res.json(simulationToJson(sim));
+    return res.json(simulationToJson(sim, req));
   } catch (err) {
     return res.status(409).json({ error: err.message });
   }
@@ -405,6 +427,80 @@ app.get("/api/logs/stream", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+function getProxyTarget(req) {
+  const requestedPort = Number(req.params.port);
+  if (!Number.isInteger(requestedPort)) return null;
+
+  let sim = null;
+  for (const candidate of simulations.values()) {
+    if (candidate.port === requestedPort) {
+      sim = candidate;
+      break;
+    }
+  }
+  if (!sim) return null;
+  return `http://127.0.0.1:${sim.port}`;
+}
+
+const simulationProxy = createProxyMiddleware({
+  changeOrigin: true,
+  secure: false,
+  ws: true,
+  router: getProxyTarget,
+  onError(err, req, res) {
+    console.error("Proxy route error:", err.message);
+    if (res && !res.headersSent) {
+      res.status(502).json({ error: "Proxy forwarding failed" });
+    }
+  },
+});
+
+app.use("/proxy/:port", (req, res, next) => {
+  const requestedPort = Number(req.params.port);
+  if (!Number.isInteger(requestedPort)) {
+    return res.status(400).json({ error: "Invalid simulation port" });
+  }
+
+  let sim = null;
+  for (const candidate of simulations.values()) {
+    if (candidate.port === requestedPort) {
+      sim = candidate;
+      break;
+    }
+  }
+  if (!sim) return res.status(404).json({ error: "Simulation not found" });
+  if (sim.state === "stopped") {
+    return res.status(503).json({ error: "Simulation is not running" });
+  }
+  return simulationProxy(req, res, next);
+});
+
+const server = app.listen(PORT, () => {
   console.log(`Simulation manager running at http://localhost:${PORT}`);
+});
+
+server.on("upgrade", (req, socket, head) => {
+  const match = req.url && req.url.match(/^\/proxy\/([^/?#]+)/);
+  if (!match) return;
+
+  const requestedPort = Number(match[1]);
+  if (!Number.isInteger(requestedPort)) {
+    socket.destroy();
+    return;
+  }
+
+  let sim = null;
+  for (const candidate of simulations.values()) {
+    if (candidate.port === requestedPort) {
+      sim = candidate;
+      break;
+    }
+  }
+  if (!sim || sim.state === "stopped") {
+    socket.destroy();
+    return;
+  }
+
+  req.params = { port: String(requestedPort) };
+  simulationProxy.upgrade(req, socket, head);
 });

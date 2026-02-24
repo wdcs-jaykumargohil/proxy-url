@@ -36,6 +36,19 @@ When creating a simulation via API, you can override it with:
 
 To avoid browser CORS issues in deployment, manager API and HTTP simulated endpoints now allow all origins by default.
 
+## Multi-Proxy HTTPS Deployment
+
+For many dynamically created simulations, use one HTTPS/WSS gateway domain and route by simulation ID:
+
+- Primary endpoint returned by API: `https://your-domain/proxy/<PORT-Number>` (or `wss://...` for WS)
+- Internal simulation processes still run on dynamic local ports.
+- No per-port TLS certificate management is required.
+
+API fields:
+
+- `endpoint`: manager gateway endpoint for client use
+- `endpointDirect`: internal direct endpoint (`http://ip:port` or `ws://ip:port`)
+
 ## Docker
 
 Build image:
