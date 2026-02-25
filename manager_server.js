@@ -3,7 +3,10 @@ const path = require("path");
 const net = require("net");
 const os = require("os");
 const { spawn } = require("child_process");
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const {
+  createProxyMiddleware,
+  responseInterceptor,
+} = require("http-proxy-middleware");
 
 const app = express();
 const PORT = process.env.MANAGER_PORT ? Number(process.env.MANAGER_PORT) : 9090;
@@ -450,11 +453,88 @@ function getProxyTarget(req) {
   return `http://127.0.0.1:${sim.port}`;
 }
 
-const simulationProxy = createProxyMiddleware({
+function getProxyPathPrefix(req) {
+  const requestedPort = Number(req.params.port);
+  if (!Number.isInteger(requestedPort)) return "";
+  return `/proxy/${requestedPort}`;
+}
+
+function rewriteLocationHeader(locationValue, req) {
+  if (!locationValue) return locationValue;
+  const prefix = getProxyPathPrefix(req);
+  if (!prefix) return locationValue;
+  if (locationValue.startsWith(prefix)) return locationValue;
+  if (locationValue.startsWith("http://") || locationValue.startsWith("https://")) {
+    return locationValue;
+  }
+  if (locationValue.startsWith("/")) return `${prefix}${locationValue}`;
+  return `${prefix}/${locationValue}`;
+}
+
+function rewriteWebsiteBody(content, req) {
+  const prefix = getProxyPathPrefix(req);
+  if (!prefix) return content;
+
+  let updated = content;
+  updated = updated.replace(
+    /((?:href|src|action)=["'])\/(?!\/)/gi,
+    `$1${prefix}/`,
+  );
+  updated = updated.replace(
+    /(url\(["']?)\/(?!\/)/gi,
+    `$1${prefix}/`,
+  );
+  updated = updated.replace(
+    /(fetch\(["'])\/(?!\/)/gi,
+    `$1${prefix}/`,
+  );
+  return updated;
+}
+
+function shouldRewriteWebsiteResponse(req) {
+  if (req.method !== "GET") return false;
+  const accept = String(req.headers.accept || "").toLowerCase();
+  if (accept.includes("text/html")) return true;
+  const pathname = String(req.path || "").toLowerCase();
+  return pathname.endsWith(".css");
+}
+
+const simulationStreamProxy = createProxyMiddleware({
   changeOrigin: true,
   secure: false,
   ws: true,
   router: getProxyTarget,
+  onProxyRes(proxyRes, req) {
+    if (proxyRes.headers.location) {
+      proxyRes.headers.location = rewriteLocationHeader(proxyRes.headers.location, req);
+    }
+  },
+  onError(err, req, res) {
+    console.error("Proxy route error:", err.message);
+    if (res && !res.headersSent) {
+      res.status(502).json({ error: "Proxy forwarding failed" });
+    }
+  },
+});
+
+const simulationRewriteProxy = createProxyMiddleware({
+  changeOrigin: true,
+  secure: false,
+  ws: false,
+  selfHandleResponse: true,
+  router: getProxyTarget,
+  onProxyRes: responseInterceptor(async (buffer, proxyRes, req) => {
+    if (proxyRes.headers.location) {
+      proxyRes.headers.location = rewriteLocationHeader(proxyRes.headers.location, req);
+    }
+
+    const contentType = String(proxyRes.headers["content-type"] || "").toLowerCase();
+    if (contentType.includes("text/html") || contentType.includes("text/css")) {
+      const text = buffer.toString("utf8");
+      return rewriteWebsiteBody(text, req);
+    }
+    return buffer;
+  }),
   onError(err, req, res) {
     console.error("Proxy route error:", err.message);
     if (res && !res.headersSent) {
@@ -480,7 +560,10 @@ app.use("/proxy/:port", (req, res, next) => {
   if (sim.state === "stopped") {
     return res.status(503).json({ error: "Simulation is not running" });
   }
-  return simulationProxy(req, res, next);
+  if (shouldRewriteWebsiteResponse(req)) {
+    return simulationRewriteProxy(req, res, next);
+  }
+  return simulationStreamProxy(req, res, next);
 });
 
 const server = app.listen(PORT, () => {
@@ -510,5 +593,5 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   req.params = { port: String(requestedPort) };
-  simulationProxy.upgrade(req, socket, head);
+  simulationStreamProxy.upgrade(req, socket, head);
 });
