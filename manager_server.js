@@ -16,6 +16,8 @@ const MAX_PORT = 65535;
 const DEFAULT_ERROR_STATUS = 500;
 const DEFAULT_ERROR_MESSAGE = "Service unavailable (simulated)";
 const DEFAULT_MAX_REQUESTS_PER_SECOND = 15;
+const MAX_LOG_ENTRIES = 60;
+const LOG_STREAM_HEARTBEAT_MS = 15000;
 
 const simulations = new Map();
 const logClients = new Set();
@@ -44,7 +46,16 @@ app.use((req, res, next) => {
   return next();
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    setHeaders(res, filePath) {
+      if (path.basename(filePath) !== "index.html") return;
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    },
+  }),
+);
 
 function getExposedIp() {
   const interfaces = os.networkInterfaces();
@@ -107,12 +118,33 @@ function canAccessSimulation(req, sim) {
   return sim.ownerId === userId;
 }
 
+function parseRequestedSimulationIds(req) {
+  const rawIds = req.query.ids;
+  if (!rawIds) return null;
+  const values = Array.isArray(rawIds) ? rawIds : [rawIds];
+  const ids = new Set();
+  for (const value of values) {
+    const parts = String(value)
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    for (const part of parts) ids.add(part);
+  }
+  return ids.size ? ids : null;
+}
+
+function canClientReceiveLog(client, entry) {
+  const hasAccess = client.isAdmin || (client.userId && client.userId === entry.ownerId);
+  if (!hasAccess) return false;
+  if (!client.requestedIds) return true;
+  return client.requestedIds.has(String(entry.id));
+}
+
 function broadcastLog(entry) {
   const payload = `data: ${JSON.stringify(entry)}\n\n`;
   for (const client of logClients) {
-    if (client.isAdmin || (client.userId && client.userId === entry.ownerId)) {
-      client.res.write(payload);
-    }
+    if (!canClientReceiveLog(client, entry)) continue;
+    client.res.write(payload);
   }
 }
 
@@ -126,7 +158,7 @@ function appendLog(sim, stream, line) {
     at: nowIso(),
   };
   sim.logs.push(entry);
-  if (sim.logs.length > 600) sim.logs.shift();
+  if (sim.logs.length > MAX_LOG_ENTRIES) sim.logs.shift();
   broadcastLog(entry);
 }
 
@@ -360,7 +392,7 @@ app.post("/api/simulations/:id/down", (req, res) => {
   try {
     sendCommand(sim, "b");
     sim.state = "down";
-    // appendLog(sim, "system", "command sent: b (DOWN)");
+    appendLog(sim, "system", "command sent: b (DOWN)");
     return res.json(simulationToJson(sim, req));
   } catch (err) {
     return res.status(409).json({ error: err.message });
@@ -376,7 +408,7 @@ app.post("/api/simulations/:id/up", (req, res) => {
   try {
     sendCommand(sim, "f");
     sim.state = "up";
-    // appendLog(sim, "system", "command sent: f (UP)");
+    appendLog(sim, "system", "command sent: f (UP)");
     return res.json(simulationToJson(sim, req));
   } catch (err) {
     return res.status(409).json({ error: err.message });
@@ -415,11 +447,16 @@ app.get("/api/logs/stream", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+  res.write("retry: 3000\n\n");
 
+  const requestedIds = parseRequestedSimulationIds(req);
   const backlog = [];
   for (const sim of simulations.values()) {
-    if (canAccessSimulation(req, sim)) backlog.push(...sim.logs.slice(-50));
+    if (!canAccessSimulation(req, sim)) continue;
+    if (requestedIds && !requestedIds.has(String(sim.id))) continue;
+    backlog.push(...sim.logs.slice(-MAX_LOG_ENTRIES));
   }
 
   backlog.sort((a, b) => (a.at > b.at ? 1 : -1));
@@ -427,13 +464,19 @@ app.get("/api/logs/stream", (req, res) => {
     res.write(`data: ${JSON.stringify(entry)}\n\n`);
   }
 
+  const heartbeatTimer = setInterval(() => {
+    res.write(`event: heartbeat\ndata: ${Date.now()}\n\n`);
+  }, LOG_STREAM_HEARTBEAT_MS);
+
   const client = {
     res,
     isAdmin: isAdminRequest(req),
     userId: getRequestUserId(req),
+    requestedIds,
   };
   logClients.add(client);
   req.on("close", () => {
+    clearInterval(heartbeatTimer);
     logClients.delete(client);
   });
 });

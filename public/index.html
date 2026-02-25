@@ -766,8 +766,20 @@
       const terminalColsStorageKey = "proxy_sim_terminal_cols";
       const panelStateStorageKey = "proxy_sim_panel_state";
       const terminalHeightStorageKeyBase = "proxy_sim_terminal_height";
+      const terminalBootstrapPollMs = 1000;
+      const terminalBootstrapMaxAttempts = 5;
+      const TERMINAL_LOG_LIMIT = 60;
+      const LOG_STREAM_STALE_MS = 45000;
+      const LOG_STREAM_RECONNECT_BASE_MS = 1000;
+      const LOG_STREAM_RECONNECT_MAX_MS = 10000;
       const checkedTerminalIds = [];
       const terminalBuffers = new Map();
+      const terminalBootstrapIntervals = new Map();
+      let logStream = null;
+      let logStreamWatchdog = null;
+      let logStreamLastSeenAt = Date.now();
+      let logStreamReconnectAttempt = 0;
+      let logStreamReconnectTimer = null;
       let simulationsById = new Map();
 
       function getOrCreateUserId() {
@@ -855,6 +867,48 @@
 
       function saveCheckedTerminalIds() {
         localStorage.setItem(terminalSelectionStorageKey, JSON.stringify(checkedTerminalIds));
+      }
+
+      function setTerminalBuffer(simId, logs) {
+        terminalBuffers.set(
+          simId,
+          (Array.isArray(logs) ? logs : []).slice(-TERMINAL_LOG_LIMIT),
+        );
+      }
+
+      function stopTerminalBootstrap(simId) {
+        const timer = terminalBootstrapIntervals.get(simId);
+        if (!timer) return;
+        clearInterval(timer);
+        terminalBootstrapIntervals.delete(simId);
+      }
+
+      function startTerminalBootstrap(simId) {
+        stopTerminalBootstrap(simId);
+        let attempts = 0;
+
+        const timer = setInterval(async () => {
+          attempts += 1;
+          try {
+            const items = await api("/api/simulations");
+            const sim = items.find((item) => item.id === simId);
+            if (!sim) {
+              stopTerminalBootstrap(simId);
+              return;
+            }
+            simulationsById.set(sim.id, sim);
+            setTerminalBuffer(simId, sim.logs);
+            if (checkedTerminalIds.includes(simId)) renderTerminalDeck();
+          } catch {
+            // keep retrying until max attempts
+          }
+
+          if (attempts >= terminalBootstrapMaxAttempts) {
+            stopTerminalBootstrap(simId);
+          }
+        }, terminalBootstrapPollMs);
+
+        terminalBootstrapIntervals.set(simId, timer);
       }
 
       function loadPanelState() {
@@ -950,8 +1004,7 @@
           downBtn.textContent = "Down";
           downBtn.addEventListener("click", async () => {
             try {
-              await api(`/api/simulations/${sim.id}/down`, { method: "POST" });
-              await render();
+              await runSimulationAction(sim.id, "down");
             } catch {
               // ignore inline action errors
             }
@@ -962,8 +1015,7 @@
           upBtn.textContent = "Up";
           upBtn.addEventListener("click", async () => {
             try {
-              await api(`/api/simulations/${sim.id}/up`, { method: "POST" });
-              await render();
+              await runSimulationAction(sim.id, "up");
             } catch {
               // ignore inline action errors
             }
@@ -989,11 +1041,20 @@
             renderTerminalDeck();
           });
 
+          const refreshBtn = document.createElement("button");
+          refreshBtn.className = "btn-refresh";
+          refreshBtn.textContent = "⟳";
+          refreshBtn.title = "Reconnect log stream and reload recent logs";
+          refreshBtn.addEventListener("click", () => {
+            connectLogStream({ resetTerminalIds: [simId] });
+          });
+
           actionWrap.appendChild(copyBtn);
           actionWrap.appendChild(downBtn);
           actionWrap.appendChild(upBtn);
           actionWrap.appendChild(deleteBtn);
           actionWrap.appendChild(clearBtn);
+          actionWrap.appendChild(refreshBtn);
           head.appendChild(title);
           head.appendChild(actionWrap);
 
@@ -1021,9 +1082,122 @@
         if (!checkedTerminalIds.includes(entry.id)) return;
         const entries = terminalBuffers.get(entry.id) || [];
         entries.push(entry);
-        if (entries.length > 300) entries.shift();
+        if (entries.length > TERMINAL_LOG_LIMIT) entries.shift();
         terminalBuffers.set(entry.id, entries);
         renderTerminalDeck();
+      }
+
+      function resetTerminalBuffers(ids) {
+        for (const id of ids) {
+          if (!checkedTerminalIds.includes(id)) continue;
+          terminalBuffers.set(id, []);
+        }
+        renderTerminalDeck();
+      }
+
+      function markLogStreamAlive() {
+        logStreamLastSeenAt = Date.now();
+      }
+
+      function clearReconnectTimer() {
+        if (!logStreamReconnectTimer) return;
+        clearTimeout(logStreamReconnectTimer);
+        logStreamReconnectTimer = null;
+      }
+
+      function stopLogStreamWatchdog() {
+        if (!logStreamWatchdog) return;
+        clearInterval(logStreamWatchdog);
+        logStreamWatchdog = null;
+      }
+
+      function disconnectLogStream() {
+        clearReconnectTimer();
+        stopLogStreamWatchdog();
+        if (logStream) {
+          logStream.close();
+          logStream = null;
+        }
+      }
+
+      function startLogStreamWatchdog(connectFn) {
+        if (logStreamWatchdog) clearInterval(logStreamWatchdog);
+        logStreamWatchdog = setInterval(() => {
+          if (!checkedTerminalIds.length) {
+            disconnectLogStream();
+            return;
+          }
+          if (Date.now() - logStreamLastSeenAt <= LOG_STREAM_STALE_MS) return;
+          if (logStream) logStream.close();
+          connectFn({ resetTerminalIds: [...checkedTerminalIds] });
+        }, 5000);
+      }
+
+      function getReconnectDelayMs() {
+        const base = Math.min(
+          LOG_STREAM_RECONNECT_BASE_MS * 2 ** logStreamReconnectAttempt,
+          LOG_STREAM_RECONNECT_MAX_MS,
+        );
+        return base + Math.floor(Math.random() * 300);
+      }
+
+      function connectLogStream(options = {}) {
+        const { resetTerminalIds = [], force = false } = options;
+        if (!force && !checkedTerminalIds.length) {
+          disconnectLogStream();
+          return;
+        }
+        clearReconnectTimer();
+        if (logStream) logStream.close();
+        if (resetTerminalIds.length) resetTerminalBuffers(resetTerminalIds);
+
+        const streamUrl = new URL("/api/logs/stream", window.location.origin);
+        if (isAdmin) streamUrl.searchParams.set("role", "admin");
+        else streamUrl.searchParams.set("user_id", userId);
+
+        const selectedIds = [...new Set(checkedTerminalIds.map((id) => String(id)))];
+        if (selectedIds.length) streamUrl.searchParams.set("ids", selectedIds.join(","));
+
+        logStream = new EventSource(streamUrl.toString());
+        markLogStreamAlive();
+        startLogStreamWatchdog(connectLogStream);
+
+        logStream.onopen = () => {
+          markLogStreamAlive();
+          logStreamReconnectAttempt = 0;
+        };
+
+        logStream.onmessage = (event) => {
+          markLogStreamAlive();
+          addLog(JSON.parse(event.data));
+        };
+
+        logStream.addEventListener("heartbeat", () => {
+          markLogStreamAlive();
+        });
+
+        logStream.onerror = () => {
+          if (logStream) logStream.close();
+          if (!checkedTerminalIds.length) {
+            disconnectLogStream();
+            return;
+          }
+          logStreamReconnectAttempt += 1;
+          clearReconnectTimer();
+          logStreamReconnectTimer = setTimeout(
+            () => connectLogStream({ resetTerminalIds: [...checkedTerminalIds] }),
+            getReconnectDelayMs(),
+          );
+        };
+      }
+
+      async function runSimulationAction(simId, action) {
+        const updated = await api(`/api/simulations/${simId}/${action}`, { method: "POST" });
+        if (updated && updated.id) {
+          simulationsById.set(updated.id, updated);
+          setTerminalBuffer(updated.id, updated.logs);
+        }
+        await render();
       }
 
       function actionButton(text, className, fn) {
@@ -1044,14 +1218,16 @@
           if (!simulationsById.has(id)) {
             checkedTerminalIds.splice(i, 1);
             terminalBuffers.delete(id);
+            stopTerminalBootstrap(id);
           }
         }
         for (const id of checkedTerminalIds) {
           if (!terminalBuffers.has(id)) {
             const sim = simulationsById.get(id);
-            if (sim) terminalBuffers.set(id, (sim.logs || []).slice(-300));
+            if (sim) setTerminalBuffer(id, sim.logs);
           }
         }
+        if (!checkedTerminalIds.length) disconnectLogStream();
         saveCheckedTerminalIds();
 
         for (const sim of items) {
@@ -1081,11 +1257,19 @@
           checkbox.addEventListener("change", () => {
             if (checkbox.checked) {
               if (!checkedTerminalIds.includes(sim.id)) checkedTerminalIds.push(sim.id);
-              if (!terminalBuffers.has(sim.id)) terminalBuffers.set(sim.id, (sim.logs || []).slice(-300));
+              if (!terminalBuffers.has(sim.id)) setTerminalBuffer(sim.id, sim.logs);
+              startTerminalBootstrap(sim.id);
+              connectLogStream({ resetTerminalIds: [sim.id], force: true });
             } else {
               const idx = checkedTerminalIds.indexOf(sim.id);
               if (idx >= 0) checkedTerminalIds.splice(idx, 1);
               terminalBuffers.delete(sim.id);
+              stopTerminalBootstrap(sim.id);
+              if (checkedTerminalIds.length) {
+                connectLogStream({ resetTerminalIds: [...checkedTerminalIds], force: true });
+              } else {
+                disconnectLogStream();
+              }
             }
             saveCheckedTerminalIds();
             updateSelectAllState();
@@ -1101,15 +1285,13 @@
 
           actionCell.appendChild(
             actionButton("Down", "warn", async () => {
-              await api(`/api/simulations/${sim.id}/down`, { method: "POST" });
-              render();
+              await runSimulationAction(sim.id, "down");
             }),
           );
 
           actionCell.appendChild(
             actionButton("Up", "", async () => {
-              await api(`/api/simulations/${sim.id}/up`, { method: "POST" });
-              render();
+              await runSimulationAction(sim.id, "up");
             }),
           );
 
@@ -1148,8 +1330,10 @@
           if (created && created.id && !checkedTerminalIds.includes(created.id)) {
             checkedTerminalIds.push(created.id);
           }
-          if (created && created.id && !terminalBuffers.has(created.id)) {
-            terminalBuffers.set(created.id, (created.logs || []).slice(-300));
+          if (created && created.id) {
+            if (!terminalBuffers.has(created.id)) setTerminalBuffer(created.id, created.logs);
+            startTerminalBootstrap(created.id);
+            connectLogStream({ resetTerminalIds: [created.id], force: true });
           }
           saveCheckedTerminalIds();
           await render();
@@ -1174,12 +1358,16 @@
             if (!checkedTerminalIds.includes(id)) checkedTerminalIds.push(id);
             if (!terminalBuffers.has(id)) {
               const sim = simulationsById.get(id);
-              terminalBuffers.set(id, (sim && sim.logs ? sim.logs : []).slice(-300));
+              setTerminalBuffer(id, sim && sim.logs ? sim.logs : []);
             }
+            startTerminalBootstrap(id);
           }
+          connectLogStream({ resetTerminalIds: [...checkedTerminalIds], force: true });
         } else {
           checkedTerminalIds.splice(0, checkedTerminalIds.length);
           terminalBuffers.clear();
+          for (const id of terminalBootstrapIntervals.keys()) stopTerminalBootstrap(id);
+          disconnectLogStream();
         }
         saveCheckedTerminalIds();
         updateSelectAllState();
@@ -1216,15 +1404,10 @@
         });
       }
 
-      const streamUrl = isAdmin
-        ? "/api/logs/stream?role=admin"
-        : `/api/logs/stream?user_id=${encodeURIComponent(userId)}`;
-      const stream = new EventSource(streamUrl);
-      stream.onmessage = (event) => addLog(JSON.parse(event.data));
-
       setTerminalColumns(Number(localStorage.getItem(terminalColsStorageKey) || "2"));
       setTerminalHeight(Number(localStorage.getItem(terminalHeightStorageKey) || "210"));
       loadCheckedTerminalIds();
+      if (checkedTerminalIds.length) connectLogStream({ force: true });
       applyFormDefaults();
       render();
       setInterval(render, 3000);
