@@ -451,6 +451,20 @@ app.get("/api/logs/stream", (req, res) => {
     res.write(`data: ${JSON.stringify(entry)}\n\n`);
   }
 
+  const initialHeartbeatIds = [];
+  for (const sim of simulations.values()) {
+    if (!canAccessSimulation(req, sim)) continue;
+    if (filterIds && !filterIds.has(sim.id)) continue;
+    initialHeartbeatIds.push(sim.id);
+  }
+  res.write(
+    `data: ${JSON.stringify({
+      type: "heartbeat",
+      ids: initialHeartbeatIds,
+      at: nowIso(),
+    })}\n\n`,
+  );
+
   const client = {
     res,
     isAdmin: isAdminRequest(req),
@@ -459,9 +473,28 @@ app.get("/api/logs/stream", (req, res) => {
   };
   logClients.add(client);
 
-  // Send a keepalive comment every 15s to detect stale connections
+  function getHeartbeatIds() {
+    const ids = [];
+    for (const sim of simulations.values()) {
+      if (!canAccessSimulation(req, sim)) continue;
+      if (filterIds && !filterIds.has(sim.id)) continue;
+      ids.push(sim.id);
+    }
+    return ids;
+  }
+
+  // Send per-terminal heartbeat every 15s so client can track stream health by id
   const keepalive = setInterval(() => {
-    try { res.write(": keepalive\n\n"); } catch { clearInterval(keepalive); }
+    try {
+      const heartbeat = {
+        type: "heartbeat",
+        ids: getHeartbeatIds(),
+        at: nowIso(),
+      };
+      res.write(`data: ${JSON.stringify(heartbeat)}\n\n`);
+    } catch {
+      clearInterval(keepalive);
+    }
   }, 15000);
 
   req.on("close", () => {

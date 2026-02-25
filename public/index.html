@@ -515,6 +515,19 @@
       .term-dot-r { background: #ff5f57; }
       .term-dot-y { background: #febc2e; }
       .term-dot-g { background: #28c840; }
+      .terminal-stream-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        margin-left: 2px; flex-shrink: 0;
+        border: 1px solid transparent;
+      }
+      .terminal-stream-dot.is-online {
+        background: #22c55e;
+        box-shadow: 0 0 0 1px rgba(34,197,94,.18), 0 0 8px rgba(34,197,94,.45);
+      }
+      .terminal-stream-dot.is-offline {
+        background: #ef4444;
+        box-shadow: 0 0 0 1px rgba(239,68,68,.2);
+      }
 
       .terminal-title {
         font-family: var(--font-mono); font-size: 11px;
@@ -846,7 +859,12 @@
 
       const checkedTerminalIds = [];
       const terminalBuffers    = new Map();
+      const terminalLastSeenAt = new Map();
+      const terminalStreamUp   = new Map();
+      const terminalNeedsResync = new Set();
+      const terminalResyncInFlight = new Set();
       let   simulationsById    = new Map();
+      const TERMINAL_STALE_MS  = 35_000;
 
       /* ── User identity ──────────────────────────────────────── */
       function getOrCreateUserId() {
@@ -968,6 +986,67 @@
         } catch { /* ignore */ }
       }
 
+      function setTerminalStreamState(simId, isOnline) {
+        const next = Boolean(isOnline);
+        if (terminalStreamUp.get(simId) === next) return false;
+        terminalStreamUp.set(simId, next);
+        return true;
+      }
+
+      function markTerminalDisconnected(simId) {
+        terminalNeedsResync.add(simId);
+        terminalLastSeenAt.delete(simId);
+        const entries = terminalBuffers.get(simId) || [];
+        const hadLogs = entries.length > 0;
+        if (hadLogs) terminalBuffers.set(simId, []);
+        return setTerminalStreamState(simId, false) || hadLogs;
+      }
+
+      function markTerminalActivity(simId) {
+        terminalLastSeenAt.set(simId, Date.now());
+        return setTerminalStreamState(simId, true);
+      }
+
+      async function resyncTerminalIfNeeded(simId) {
+        if (!terminalNeedsResync.has(simId)) return;
+        if (!checkedTerminalIds.includes(simId)) {
+          terminalNeedsResync.delete(simId);
+          return;
+        }
+        if (terminalResyncInFlight.has(simId)) return;
+
+        terminalResyncInFlight.add(simId);
+        try {
+          await refreshTerminal(simId);
+          terminalNeedsResync.delete(simId);
+        } finally {
+          terminalResyncInFlight.delete(simId);
+        }
+      }
+
+      function markAllCheckedTerminalsOffline() {
+        let changed = false;
+        for (const id of checkedTerminalIds) {
+          if (markTerminalDisconnected(id)) changed = true;
+        }
+        if (changed) renderTerminalDeck();
+      }
+
+      function evaluateTerminalStreamHealth() {
+        const now = Date.now();
+        let changed = false;
+        for (const id of checkedTerminalIds) {
+          const lastSeen = terminalLastSeenAt.get(id) || 0;
+          const online = Boolean(_sseSource) && now - lastSeen <= TERMINAL_STALE_MS;
+          if (online) {
+            if (setTerminalStreamState(id, true)) changed = true;
+          } else if (markTerminalDisconnected(id)) {
+            changed = true;
+          }
+        }
+        if (changed) renderTerminalDeck();
+      }
+
       /* ── Select-all checkbox state ──────────────────────────── */
       function updateSelectAllState() {
         const total = simulationsById.size;
@@ -1032,8 +1111,13 @@
           const title = document.createElement("span");
           title.className   = "terminal-title";
           title.textContent = `${sim.id} · ${sim.name} · ${getSimulatedEndpoint(sim)}`;
+          const streamDot = document.createElement("span");
+          const isOnline = terminalStreamUp.get(simId) === true;
+          streamDot.className = `terminal-stream-dot ${isOnline ? "is-online" : "is-offline"}`;
+          streamDot.title = isOnline ? "streaming: connected" : "streaming: disconnected";
 
           titleWrap.appendChild(dots);
+          titleWrap.appendChild(streamDot);
           titleWrap.appendChild(title);
 
           /* ── Action buttons in card header ── */
@@ -1113,6 +1197,7 @@
       /* ── Add incoming SSE log line ──────────────────────────── */
       function addLog(entry) {
         if (!checkedTerminalIds.includes(entry.id)) return;
+        markTerminalActivity(entry.id);
         const entries = terminalBuffers.get(entry.id) || [];
         entries.push(entry);
         if (entries.length > 300) entries.shift();
@@ -1131,6 +1216,7 @@
 
       /* ── Main render ────────────────────────────────────────── */
       async function render() {
+        const checkedBeforeRender = checkedTerminalIds.join(",");
         const items = await api("/api/simulations");
         simulationsById = new Map(items.map(sim => [sim.id, sim]));
         rows.innerHTML = "";
@@ -1141,6 +1227,10 @@
           if (!simulationsById.has(id)) {
             checkedTerminalIds.splice(i, 1);
             terminalBuffers.delete(id);
+            terminalLastSeenAt.delete(id);
+            terminalStreamUp.delete(id);
+            terminalNeedsResync.delete(id);
+            terminalResyncInFlight.delete(id);
           }
         }
         for (const id of checkedTerminalIds) {
@@ -1148,8 +1238,13 @@
             const sim = simulationsById.get(id);
             if (sim) terminalBuffers.set(id, (sim.logs || []).slice(-300));
           }
+          if (!terminalStreamUp.has(id)) terminalStreamUp.set(id, false);
         }
         saveCheckedTerminalIds();
+        const checkedAfterRender = checkedTerminalIds.join(",");
+        if (checkedAfterRender !== checkedBeforeRender) {
+          syncSseSubscription();
+        }
 
         /* Empty state row */
         if (!items.length) {
@@ -1189,10 +1284,15 @@
               if (!checkedTerminalIds.includes(sim.id)) checkedTerminalIds.push(sim.id);
               if (!terminalBuffers.has(sim.id))
                 terminalBuffers.set(sim.id, (sim.logs || []).slice(-300));
+              if (!terminalStreamUp.has(sim.id)) terminalStreamUp.set(sim.id, false);
             } else {
               const idx = checkedTerminalIds.indexOf(sim.id);
               if (idx >= 0) checkedTerminalIds.splice(idx, 1);
               terminalBuffers.delete(sim.id);
+              terminalLastSeenAt.delete(sim.id);
+              terminalStreamUp.delete(sim.id);
+              terminalNeedsResync.delete(sim.id);
+              terminalResyncInFlight.delete(sim.id);
             }
             saveCheckedTerminalIds();
             updateSelectAllState();
@@ -1244,6 +1344,7 @@
           if (created && created.id && !terminalBuffers.has(created.id))
             terminalBuffers.set(created.id, (created.logs || []).slice(-300));
           saveCheckedTerminalIds();
+          syncSseSubscription();
           await render();
           form.reset();
           document.getElementById("errorCode").value    = "500";
@@ -1270,8 +1371,15 @@
               const sim = simulationsById.get(id);
               terminalBuffers.set(id, (sim && sim.logs ? sim.logs : []).slice(-300));
             }
+            if (!terminalStreamUp.has(id)) terminalStreamUp.set(id, false);
           }
         } else {
+          for (const id of checkedTerminalIds) {
+            terminalLastSeenAt.delete(id);
+            terminalStreamUp.delete(id);
+            terminalNeedsResync.delete(id);
+            terminalResyncInFlight.delete(id);
+          }
           checkedTerminalIds.splice(0, checkedTerminalIds.length);
           terminalBuffers.clear();
         }
@@ -1351,6 +1459,7 @@
           _sseSource.close();
           _sseSource = null;
         }
+        markAllCheckedTerminalsOffline();
       }
 
       function _reconnectSse(clearVisibleBuffers = false, replayBacklog = true) {
@@ -1364,11 +1473,37 @@
 
         const src = new EventSource(_sseUrl(replayBacklog));
         _sseSource = src;
+        markAllCheckedTerminalsOffline();
         _resetStaleTimer(); // start stale watchdog
 
         src.onmessage = (event) => {
           _resetStaleTimer(); // any message resets the watchdog
-          addLog(JSON.parse(event.data));
+          let payload = null;
+          try {
+            payload = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if (!payload || typeof payload !== "object") return;
+          if (payload.type === "heartbeat") {
+            const heartbeatIds = new Set(
+              Array.isArray(payload.ids) ? payload.ids.map(String) : [],
+            );
+            let changed = false;
+            for (const id of checkedTerminalIds) {
+              const online = heartbeatIds.has(id);
+              if (online) {
+                terminalLastSeenAt.set(id, Date.now());
+                if (setTerminalStreamState(id, true)) changed = true;
+                resyncTerminalIfNeeded(id);
+              } else if (markTerminalDisconnected(id)) {
+                changed = true;
+              }
+            }
+            if (changed) renderTerminalDeck();
+            return;
+          }
+          addLog(payload);
         };
 
         src.onerror = () => {
@@ -1397,6 +1532,7 @@
         try {
           const result = await api(`/api/simulations/${simId}/logs`);
           terminalBuffers.set(simId, (result.logs || []).slice(-300));
+          terminalNeedsResync.delete(simId);
           renderTerminalDeck();
         } catch (error) {
           console.warn(`[Terminal] failed to refresh ${simId}`, error);
@@ -1413,6 +1549,7 @@
       applyFormDefaults();
       render();
       syncSseSubscription(); // start SSE only if terminals are already checked
+      setInterval(evaluateTerminalStreamHealth, 5000);
       setInterval(render, 3000);
     </script>
   </body>
