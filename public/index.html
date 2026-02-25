@@ -532,6 +532,19 @@
       }
       .terminal-clear:hover { background: rgba(255,255,255,.08); color: var(--text-muted); border-color: var(--text-dim); }
 
+      .terminal-refresh {
+        padding: 3px 6px; min-width: unset; line-height: 1;
+        background: rgba(255,255,255,.04); color: var(--text-dim);
+        border: 1px solid var(--border); border-radius: var(--radius-xs);
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .terminal-refresh:hover {
+        background: rgba(0,212,170,.1); color: var(--accent);
+        border-color: rgba(0,212,170,.35);
+      }
+      .terminal-refresh:active svg { animation: spin-once .35s linear; }
+      @keyframes spin-once { to { transform: rotate(360deg); } }
+
       .terminal-actions .btn-down   { background: var(--red-bg);   color: #fca5a5; border: 1px solid rgba(240,79,58,.25); }
       .terminal-actions .btn-down:hover   { background: rgba(240,79,58,.22); }
       .terminal-actions .btn-up     { background: var(--green-bg); color: #86efac; border: 1px solid rgba(34,197,94,.25); }
@@ -1063,11 +1076,18 @@
             renderTerminalDeck();
           });
 
+          const refreshBtn = document.createElement("button");
+          refreshBtn.className = "terminal-refresh";
+          refreshBtn.title     = "Refresh — reconnect log stream and replay backlog";
+          refreshBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+          refreshBtn.addEventListener("click", () => refreshTerminal(simId));
+
           actionWrap.appendChild(copyBtn);
           actionWrap.appendChild(downBtn);
           actionWrap.appendChild(upBtn);
           actionWrap.appendChild(deleteBtn);
           actionWrap.appendChild(clearBtn);
+          actionWrap.appendChild(refreshBtn);
           head.appendChild(titleWrap);
           head.appendChild(actionWrap);
 
@@ -1176,6 +1196,7 @@
             }
             saveCheckedTerminalIds();
             updateSelectAllState();
+            syncSseSubscription(); // req 6: resubscribe with new id set
             renderTerminalDeck();
           });
           showCell.appendChild(checkbox);
@@ -1256,6 +1277,7 @@
         }
         saveCheckedTerminalIds();
         updateSelectAllState();
+        syncSseSubscription(); // req 6: resubscribe with new id set
         render();
       });
 
@@ -1290,12 +1312,96 @@
         });
       }
 
-      /* ── SSE log stream ─────────────────────────────────────── */
-      const streamUrl = isAdmin
-        ? "/api/logs/stream?role=admin"
-        : `/api/logs/stream?user_id=${encodeURIComponent(userId)}`;
-      const stream = new EventSource(streamUrl);
-      stream.onmessage = (event) => addLog(JSON.parse(event.data));
+      /* ── Managed SSE log stream ─────────────────────────────
+         • Connects only when ≥1 terminal is checked
+         • Sends ?ids=... so backend only streams relevant logs
+         • Auto-reconnects on error / stale (no message > 20s)
+         • refreshTerminal(simId) reloads backlog only for that terminal
+      ─────────────────────────────────────────────────────── */
+      let   _sseSource       = null;
+      let   _sseStaleTimer   = null;
+      const SSE_STALE_MS     = 20_000; // reconnect if no event for 20s
+
+      function _sseUrl(replayBacklog = true) {
+        const url = new URL("/api/logs/stream", window.location.origin);
+        if (isAdmin) url.searchParams.set("role", "admin");
+        else         url.searchParams.set("user_id", encodeURIComponent(userId));
+        if (checkedTerminalIds.length)
+          url.searchParams.set("ids", checkedTerminalIds.join(","));
+        url.searchParams.set("backlog", replayBacklog ? "50" : "0");
+        return url.toString();
+      }
+
+      function _resetStaleTimer() {
+        clearTimeout(_sseStaleTimer);
+        _sseStaleTimer = setTimeout(() => {
+          console.warn("[SSE] stale — reconnecting");
+          _reconnectSse(/*clearVisible=*/true);
+        }, SSE_STALE_MS);
+      }
+
+      function _clearStaleTimer() {
+        clearTimeout(_sseStaleTimer);
+        _sseStaleTimer = null;
+      }
+
+      function _closeSse() {
+        _clearStaleTimer();
+        if (_sseSource) {
+          _sseSource.close();
+          _sseSource = null;
+        }
+      }
+
+      function _reconnectSse(clearVisibleBuffers = false, replayBacklog = true) {
+        _closeSse();
+        if (!checkedTerminalIds.length) return; // req 4/5: no terminals → stay off
+
+        if (clearVisibleBuffers) {
+          for (const id of checkedTerminalIds) terminalBuffers.set(id, []);
+          renderTerminalDeck();
+        }
+
+        const src = new EventSource(_sseUrl(replayBacklog));
+        _sseSource = src;
+        _resetStaleTimer(); // start stale watchdog
+
+        src.onmessage = (event) => {
+          _resetStaleTimer(); // any message resets the watchdog
+          addLog(JSON.parse(event.data));
+        };
+
+        src.onerror = () => {
+          // Browser will retry; we just mark as stale and do our own reconnect
+          console.warn("[SSE] error event — will reconnect");
+          _closeSse();
+          // Delay a bit before reconnecting to avoid tight loops
+          setTimeout(() => _reconnectSse(true), 2000);
+        };
+      }
+
+      /* Call this whenever checkedTerminalIds changes */
+      function syncSseSubscription() {
+        if (!checkedTerminalIds.length) {
+          _closeSse(); // req 5: disconnect when nothing is checked
+          return;
+        }
+        // Resubscribe with new id set without replaying backlog to avoid duplicates
+        _reconnectSse(false, false);
+      }
+
+      /* Refresh a single terminal without touching other terminal buffers */
+      async function refreshTerminal(simId) {
+        terminalBuffers.set(simId, []);
+        renderTerminalDeck();
+        try {
+          const result = await api(`/api/simulations/${simId}/logs`);
+          terminalBuffers.set(simId, (result.logs || []).slice(-300));
+          renderTerminalDeck();
+        } catch (error) {
+          console.warn(`[Terminal] failed to refresh ${simId}`, error);
+        }
+      }
 
       /* ── Bootstrap ──────────────────────────────────────────── */
       const savedCols   = Number(localStorage.getItem(terminalColsStorageKey) || "2");
@@ -1306,6 +1412,7 @@
       loadCheckedTerminalIds();
       applyFormDefaults();
       render();
+      syncSseSubscription(); // start SSE only if terminals are already checked
       setInterval(render, 3000);
     </script>
   </body>

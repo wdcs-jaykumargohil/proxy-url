@@ -110,9 +110,11 @@ function canAccessSimulation(req, sim) {
 function broadcastLog(entry) {
   const payload = `data: ${JSON.stringify(entry)}\n\n`;
   for (const client of logClients) {
-    if (client.isAdmin || (client.userId && client.userId === entry.ownerId)) {
-      client.res.write(payload);
-    }
+    const hasAccess = client.isAdmin || (client.userId && client.userId === entry.ownerId);
+    if (!hasAccess) continue;
+    // If the client subscribed to specific ids, only send matching ones
+    if (client.ids && client.ids.size > 0 && !client.ids.has(entry.id)) continue;
+    client.res.write(payload);
   }
 }
 
@@ -267,6 +269,15 @@ app.get("/api/simulations", (req, res) => {
   return res.json(filtered.map((sim) => simulationToJson(sim, req)));
 });
 
+app.get("/api/simulations/:id/logs", (req, res) => {
+  const sim = simulations.get(req.params.id);
+  if (!sim) return res.status(404).json({ error: "Simulation not found" });
+  if (!canAccessSimulation(req, sim))
+    return res.status(403).json({ error: "Forbidden" });
+
+  return res.json({ id: sim.id, logs: sim.logs.slice(-300) });
+});
+
 app.post("/api/simulations", async (req, res) => {
   const isAdmin = isAdminRequest(req);
   const ownerId = getRequestUserId(req);
@@ -417,9 +428,22 @@ app.get("/api/logs/stream", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
+  // Parse optional ids filter: ?ids=sim-1,sim-2
+  const idsParam = req.query.ids ? String(req.query.ids).trim() : "";
+  const filterIds = idsParam
+    ? new Set(idsParam.split(",").map((s) => s.trim()).filter(Boolean))
+    : null; // null = no filter (all accessible)
+  const rawBacklog = Number(req.query.backlog);
+  const backlogLimit =
+    Number.isInteger(rawBacklog) && rawBacklog >= 0
+      ? Math.min(rawBacklog, 300)
+      : 50;
+
   const backlog = [];
   for (const sim of simulations.values()) {
-    if (canAccessSimulation(req, sim)) backlog.push(...sim.logs.slice(-50));
+    if (!canAccessSimulation(req, sim)) continue;
+    if (filterIds && !filterIds.has(sim.id)) continue;
+    if (backlogLimit > 0) backlog.push(...sim.logs.slice(-backlogLimit));
   }
 
   backlog.sort((a, b) => (a.at > b.at ? 1 : -1));
@@ -431,9 +455,17 @@ app.get("/api/logs/stream", (req, res) => {
     res,
     isAdmin: isAdminRequest(req),
     userId: getRequestUserId(req),
+    ids: filterIds, // Set<string> or null
   };
   logClients.add(client);
+
+  // Send a keepalive comment every 15s to detect stale connections
+  const keepalive = setInterval(() => {
+    try { res.write(": keepalive\n\n"); } catch { clearInterval(keepalive); }
+  }, 15000);
+
   req.on("close", () => {
+    clearInterval(keepalive);
     logClients.delete(client);
   });
 });
