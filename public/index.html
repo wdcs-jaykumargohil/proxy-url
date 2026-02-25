@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Proxy Simulation Manager</title>
     <style>
+      /* ─── Design Tokens ─────────────────────────────────────── */
       :root {
         --bg: #f4f1ea;
         --panel: #fffdf8;
@@ -12,17 +13,42 @@
         --muted: #6f737d;
         --line: #d9d0c1;
         --accent: #0d7a64;
+        --accent-dark: #0a6454;
         --danger: #c84235;
+        --danger-dark: #a8372c;
+        --navy: #323b4e;
+        --navy-dark: #263044;
+        --blue: #2e6b9a;
+        --blue-dark: #255780;
+        --slate: #4a5768;
+
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+
+        --shadow-card: 0 1px 3px rgba(0,0,0,.07), 0 4px 12px rgba(0,0,0,.05);
+        --shadow-panel: 0 2px 8px rgba(0,0,0,.06);
+
+        --gap: 14px;
+        --page-pad-x: 20px;
+        --page-pad-y: 24px;
+
+        --terminal-cols: 2;
+        --terminal-height: 210px;
       }
-      * {
-        box-sizing: border-box;
-      }
+
+      /* ─── Reset ─────────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+
+      /* ─── Body / Page ───────────────────────────────────────── */
       body {
         margin: 0;
         min-height: 100vh;
         height: 100vh;
         overflow: hidden;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
         color: var(--ink);
         background:
           radial-gradient(circle at 20% -10%, #d9e9e4 0, transparent 35%),
@@ -31,286 +57,442 @@
         background-repeat: no-repeat;
         background-attachment: fixed;
       }
+
       .page {
         width: 100%;
         height: 100vh;
         margin: 0;
-        padding: 24px 16px 52px;
+        padding: var(--page-pad-y) var(--page-pad-x) 52px;
         overflow-y: auto;
+        overflow-x: hidden;
       }
+
+      /* ─── Header ────────────────────────────────────────────── */
+      .page-header {
+        margin-bottom: 20px;
+      }
+
       h1 {
-        margin: 0 0 12px;
-        font-size: 30px;
+        margin: 0 0 6px;
+        font-size: clamp(20px, 4vw, 28px);
+        font-weight: 700;
+        letter-spacing: -0.3px;
       }
+
       .sub {
         color: var(--muted);
-        margin: 0 0 20px;
+        margin: 0;
+        font-size: 13px;
       }
+
+      /* ─── Panel ─────────────────────────────────────────────── */
       .panel {
         background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         padding: 16px;
+        box-shadow: var(--shadow-panel);
+        margin-top: var(--gap);
       }
+
+      .panel:first-of-type { margin-top: 0; }
+
       .panel-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        margin-bottom: 10px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
       }
+
       .panel-header h3 {
         margin: 0;
+        font-size: 15px;
+        font-weight: 600;
       }
-      .panel-toggle {
-        width: auto;
-        padding: 6px 10px;
-        border-radius: 8px;
-        background: #344157;
+
+      .panel-body.is-collapsed { display: none; }
+
+      /* ─── Buttons (base) ─────────────────────────────────────── */
+      button, input, select {
+        font-family: inherit;
+        font-size: 14px;
+      }
+
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        cursor: pointer;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.2;
+        color: #fff;
+        background: var(--accent);
+        transition: background 0.15s, opacity 0.15s, transform 0.1s;
+        white-space: nowrap;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button:hover  { background: var(--accent-dark); }
+      button:active { transform: scale(0.97); }
+
+      button.alt  { background: var(--navy); }
+      button.alt:hover { background: var(--navy-dark); }
+
+      button.copy { background: var(--blue); }
+      button.copy:hover { background: var(--blue-dark); }
+
+      button.warn { background: var(--danger); }
+      button.warn:hover { background: var(--danger-dark); }
+
+      button.panel-toggle {
+        padding: 5px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--navy);
         font-size: 12px;
+        min-width: 80px;
       }
-      .panel-body.is-collapsed {
-        display: none;
+      button.panel-toggle:hover { background: var(--navy-dark); }
+
+      /* ─── Form Fields ───────────────────────────────────────── */
+      input, select {
+        width: 100%;
+        border: 1px solid #c4bdb3;
+        border-radius: var(--radius-sm);
+        padding: 9px 11px;
+        font-size: 14px;
+        background: #fff;
+        color: var(--ink);
+        transition: border-color 0.15s, box-shadow 0.15s;
+        appearance: auto;
       }
+
+      input:focus, select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(13,122,100,.14);
+      }
+
+      input::placeholder { color: #b0a99e; }
+
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        color: var(--muted);
+        margin-bottom: 5px;
+        text-transform: uppercase;
+      }
+
+      /* ─── Create Simulation Form ─────────────────────────────── */
       #simForm {
         display: grid;
         gap: 12px;
         grid-template-columns: repeat(9, minmax(0, 1fr));
       }
-      label {
-        display: block;
-        font-size: 13px;
-        margin-bottom: 5px;
-      }
-      input,
-      select,
-      button {
-        width: 100%;
-        border: 1px solid #b7b1a4;
-        border-radius: 8px;
-        padding: 9px 10px;
-        font-size: 14px;
-      }
-      button {
-        cursor: pointer;
-        border-color: transparent;
-        background: var(--accent);
-        color: #fff;
-      }
-      button.alt {
-        background: #323b4e;
-      }
-      button.copy {
-        background: #2e6b9a;
-      }
-      button.warn {
-        background: var(--danger);
-      }
-      .full {
-        grid-column: 1 / -1;
-      }
-      .field-name {
-        grid-column: 1 / 4;
-        grid-row: 1;
-      }
-      .field-simulate-url {
-        grid-column: 4 / 10;
-        grid-row: 1;
-      }
-      .field-url-type {
-        grid-column: 1 / 2;
-        grid-row: 2;
-      }
-      .field-port {
-        grid-column: 2 / 3;
-        grid-row: 2;
-      }
-      .field-error-code {
-        grid-column: 3 / 4;
-        grid-row: 2;
-      }
-      .field-error-message {
-        grid-column: 4 / 10;
-        grid-row: 2;
-      }
-      .compact-input {
-        max-width: 180px;
-      }
-      .compact-select {
-        max-width: 140px;
-      }
+
+      /* Desktop layout (default) */
+      .field-name         { grid-column: 1 / 4;  grid-row: 1; }
+      .field-simulate-url { grid-column: 4 / 10; grid-row: 1; }
+      .field-url-type     { grid-column: 1 / 2;  grid-row: 2; }
+      .field-port         { grid-column: 2 / 3;  grid-row: 2; }
+      .field-error-code   { grid-column: 3 / 4;  grid-row: 2; }
+      .field-error-message{ grid-column: 4 / 10; grid-row: 2; }
+
+      .full { grid-column: 1 / -1; }
+
       .hint {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 11px;
+        margin-top: 4px;
       }
+
       .form-actions {
         display: flex;
         gap: 10px;
-        justify-content: flex-start;
+        flex-wrap: wrap;
+        align-items: center;
       }
+
       .form-actions button {
-        width: auto;
-        min-width: 170px;
+        min-width: 150px;
+        padding: 10px 18px;
+        font-size: 14px;
       }
+
       #formError {
         color: var(--danger);
         margin-top: 8px;
         min-height: 18px;
+        font-size: 13px;
       }
+
+      /* ─── Table Wrapper (scroll on small screens) ────────────── */
+      .table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: var(--radius-md);
+      }
+
       table {
         width: 100%;
+        min-width: 720px;
         border-collapse: collapse;
       }
-      th,
+
+      thead {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--panel);
+      }
+
+      th {
+        text-align: left;
+        border-bottom: 2px solid var(--line);
+        padding: 8px 10px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
       td {
         text-align: left;
         border-bottom: 1px solid var(--line);
-        padding: 9px 8px;
+        padding: 9px 10px;
         font-size: 13px;
+        vertical-align: middle;
       }
+
+      tr:last-child td { border-bottom: none; }
+
+      tr:hover td { background: rgba(13,122,100,.03); }
+
       td.actions {
         display: flex;
-        gap: 6px;
+        flex-wrap: wrap;
+        gap: 5px;
+        align-items: center;
       }
+
       td.actions button {
         width: auto;
-      }
-      #logs {
-        height: 260px;
-        overflow: auto;
-        background: #181a1f;
-        color: #e9edf3;
-        border-radius: 10px;
-        border: 1px solid #2a2d35;
-        padding: 10px;
-        font-family: "JetBrains Mono", Consolas, monospace;
+        padding: 5px 10px;
         font-size: 12px;
+        min-width: unset;
       }
-      .line {
-        white-space: pre-wrap;
+
+      /* ─── State Badge ────────────────────────────────────────── */
+      .state-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        white-space: nowrap;
       }
-      .terminal-grid {
-        display: grid;
-        grid-template-columns: repeat(var(--terminal-cols, 2), minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 10px;
+
+      .state-badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
       }
+
+      .state-up    { background: rgba(13,122,100,.12); color: #0a6454; }
+      .state-up::before    { background: #0d7a64; }
+      .state-down  { background: rgba(200,66,53,.12); color: #a8372c; }
+      .state-down::before  { background: #c84235; }
+      .state-stopped { background: rgba(111,115,125,.12); color: #4e5360; }
+      .state-stopped::before { background: #6f737d; }
+      .state-starting { background: rgba(46,107,154,.12); color: #255780; }
+      .state-starting::before { background: #2e6b9a; animation: pulse 1s infinite; }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+
+      /* ─── Show Toggle (checkbox label) ──────────────────────── */
+      .show-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .show-toggle input { width: auto; cursor: pointer; }
+
+      /* ─── Terminal Panel ─────────────────────────────────────── */
       .terminal-toolbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
       }
+
       .terminal-toolbar-left {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
+        flex-wrap: wrap;
       }
+
       .terminal-size-controls {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
         font-size: 12px;
         color: var(--muted);
       }
+
       .terminal-size-controls button {
-        width: auto;
-        min-width: 26px;
-        padding: 2px 8px;
-        border-radius: 6px;
-        font-size: 14px;
+        width: 28px;
+        height: 28px;
+        min-width: unset;
+        padding: 0;
+        border-radius: var(--radius-sm);
+        font-size: 16px;
         line-height: 1;
-        background: #4a5768;
+        background: var(--slate);
       }
+      .terminal-size-controls button:hover { background: #3d4a59; }
+
       .layout-controls {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
         flex-wrap: wrap;
       }
+
+      .layout-controls span {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
       .layout-controls button {
         width: auto;
-        padding: 4px 8px;
-        border-radius: 6px;
+        padding: 5px 10px;
+        border-radius: var(--radius-sm);
         font-size: 12px;
-        background: #4a5768;
+        background: var(--slate);
+        min-width: unset;
       }
-      .layout-controls button.is-active {
-        background: #0d7a64;
+      .layout-controls button:hover     { background: #3d4a59; }
+      .layout-controls button.is-active { background: var(--accent); }
+      .layout-controls button.is-active:hover { background: var(--accent-dark); }
+
+      .terminal-grid {
+        display: grid;
+        grid-template-columns: repeat(var(--terminal-cols, 2), minmax(0, 1fr));
+        gap: 10px;
       }
+
       .terminal-card {
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        border: 1px solid #2f3542;
+        border-radius: var(--radius-md);
         background: #121419;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
       }
+
       .terminal-head {
         color: #dde3ec;
-        background: #222732;
+        background: #1e232e;
         border-bottom: 1px solid #2f3542;
-        padding: 8px 10px;
-        border-radius: 10px 10px 0 0;
+        padding: 8px 12px;
         font-family: "JetBrains Mono", Consolas, monospace;
         font-size: 12px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
+        gap: 8px;
+        flex-wrap: wrap;
       }
+
       .terminal-title {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+        opacity: 0.9;
       }
-      .terminal-clear {
-        width: auto;
-        padding: 3px 7px;
-        font-size: 11px;
-        border-radius: 6px;
-        background: #8f3a2f;
-      }
+
       .terminal-actions {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
       }
+
       .terminal-actions button {
         width: auto;
-        padding: 3px 7px;
+        padding: 3px 8px;
         font-size: 11px;
-        border-radius: 6px;
+        border-radius: var(--radius-sm);
+        min-width: unset;
       }
-      .terminal-actions .btn-down {
-        background: #c84235;
-      }
-      .terminal-actions .btn-up {
-        background: #0d7a64;
-      }
-      .terminal-actions .btn-delete {
-        background: #323b4e;
-      }
-      .terminal-actions .btn-copy {
-        background: #2e6b9a;
-      }
-      .show-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .show-toggle input {
+
+      .terminal-clear {
         width: auto;
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: var(--radius-sm);
+        background: #5a3a38;
+        min-width: unset;
       }
+      .terminal-clear:hover { background: #8f3a2f; }
+
+      .terminal-actions .btn-down   { background: #c84235; }
+      .terminal-actions .btn-down:hover { background: #a8372c; }
+      .terminal-actions .btn-up     { background: #0d7a64; }
+      .terminal-actions .btn-up:hover { background: #0a6454; }
+      .terminal-actions .btn-delete { background: #323b4e; }
+      .terminal-actions .btn-delete:hover { background: #263044; }
+      .terminal-actions .btn-copy   { background: #2e6b9a; }
+      .terminal-actions .btn-copy:hover { background: #255780; }
+
       .terminal-body {
         height: var(--terminal-height, 210px);
         overflow: auto;
-        padding: 10px;
+        padding: 10px 12px;
         color: #e9edf3;
         font-family: "JetBrains Mono", Consolas, monospace;
         font-size: 12px;
+        flex: 1;
       }
+
+      .line { white-space: pre-wrap; line-height: 1.6; }
+
       .terminal-empty {
         color: var(--muted);
         font-size: 13px;
+        padding: 12px 0;
       }
+
+      /* ─── Footer ─────────────────────────────────────────────── */
       .footer-note {
         position: fixed;
         left: 0;
@@ -322,16 +504,59 @@
         color: var(--muted);
         font-size: 12px;
         background: var(--bg);
+        border-top: 1px solid var(--line);
         z-index: 20;
       }
+
       .footer-note a {
-        color: inherit;
+        color: var(--ink);
         text-decoration: none;
+        font-weight: 600;
       }
-      @media (max-width: 780px) {
+
+      .footer-note a:hover { text-decoration: underline; }
+
+      /* ─── Responsive: Tablet (≤ 900px) ─────────────────────── */
+      @media (max-width: 900px) {
+        :root { --page-pad-x: 14px; }
+
+        #simForm {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .field-name         { grid-column: 1 / 3; grid-row: 1; }
+        .field-simulate-url { grid-column: 3 / 5; grid-row: 1; }
+        .field-url-type     { grid-column: 1 / 2; grid-row: 2; }
+        .field-port         { grid-column: 2 / 3; grid-row: 2; }
+        .field-error-code   { grid-column: 3 / 4; grid-row: 2; }
+        .field-error-message{ grid-column: 4 / 5; grid-row: 2; }
+
+        .terminal-grid {
+          grid-template-columns: repeat(
+            min(var(--terminal-cols, 2), 2),
+            minmax(0, 1fr)
+          );
+        }
+
+        /* Layout buttons - hide 4-col on tablets */
+        .layout-controls button[data-cols="4"] { display: none; }
+      }
+
+      /* ─── Responsive: Mobile (≤ 600px) ─────────────────────── */
+      @media (max-width: 600px) {
+        :root { --page-pad-x: 12px; --page-pad-y: 16px; }
+
+        h1 { font-size: 20px; }
+
+        .panel { padding: 12px; border-radius: var(--radius-md); }
+
+        .panel-header { margin-bottom: 10px; }
+
+        /* Single-column form */
         #simForm {
           grid-template-columns: 1fr;
         }
+
         .field-name,
         .field-url-type,
         .field-port,
@@ -339,19 +564,66 @@
         .field-error-code,
         .field-error-message {
           grid-column: 1;
+          grid-row: unset;
         }
-        .compact-input,
-        .compact-select {
-          max-width: none;
+
+        .form-actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .form-actions button {
+          width: 100%;
+          min-width: unset;
+        }
+
+        /* Force single-column terminals on mobile */
+        .terminal-grid {
+          grid-template-columns: 1fr !important;
+        }
+
+        .terminal-head {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 6px;
+        }
+
+        .terminal-title { white-space: normal; word-break: break-all; }
+
+        .terminal-actions { flex-wrap: wrap; }
+
+        /* Toolbar stacks on mobile */
+        .terminal-toolbar { flex-direction: column; align-items: flex-start; }
+
+        .terminal-toolbar-left { flex-direction: column; align-items: flex-start; }
+
+        /* Layout buttons - only show 1-col on mobile */
+        .layout-controls button[data-cols="3"],
+        .layout-controls button[data-cols="4"] { display: none; }
+
+        /* Better touch targets */
+        button { min-height: 38px; }
+
+        td.actions {
+          flex-wrap: wrap;
+        }
+
+        td.actions button {
+          flex: 1 1 auto;
+          min-width: 56px;
         }
       }
     </style>
   </head>
   <body>
     <div class="page">
-      <h1>Proxy Simulation Manager</h1>
-      <p class="sub">Create multiple HTTP/WS simulations, control break/fix, and tail runtime logs.</p>
 
+      <div class="page-header">
+        <h1>Proxy Simulation Manager</h1>
+        <p class="sub">Create multiple HTTP/WS simulations, control break/fix, and tail runtime logs.</p>
+      </div>
+
+      <!-- ── Create Simulation ─────────────────────────────────── -->
       <div class="panel">
         <div class="panel-header">
           <h3>Create Simulation</h3>
@@ -359,88 +631,91 @@
         </div>
         <div id="createPanelBody" class="panel-body">
           <form id="simForm">
-          <div class="field-name">
-            <label for="name">Name (optional)</label>
-            <input id="name" type="text" placeholder="my-eth-http-sim" />
-          </div>
+            <div class="field-name">
+              <label for="name">Name (optional)</label>
+              <input id="name" type="text" placeholder="my-eth-http-sim" />
+            </div>
 
-          <div class="field-url-type">
-            <label for="urlType">URL Type</label>
-            <select id="urlType" class="compact-select" required>
-              <option value="http">http</option>
-              <option value="ws">ws</option>
-            </select>
-          </div>
+            <div class="field-simulate-url">
+              <label for="simulateUrl">Live URL</label>
+              <input id="simulateUrl" type="text" placeholder="https://rpc-testnet.supra.com or wss://..." required />
+            </div>
 
-          <div class="field-port">
-            <label for="port">Port</label>
-            <input id="port" class="compact-input" type="number" min="1000" max="65535" required />
-            <div class="hint">Valid TCP range here is 1000-65535.</div>
-          </div>
+            <div class="field-url-type">
+              <label for="urlType">URL Type</label>
+              <select id="urlType" required>
+                <option value="http">http</option>
+                <option value="ws">ws</option>
+              </select>
+            </div>
 
-          <div class="field-simulate-url">
-            <label for="simulateUrl">Live URL</label>
-            <input id="simulateUrl" type="text" placeholder="https://rpc-testnet.supra.com or wss://..." required />
-          </div>
+            <div class="field-port">
+              <label for="port">Port</label>
+              <input id="port" type="number" min="1000" max="65535" required />
+              <div class="hint">Range: 1000–65535</div>
+            </div>
 
-          <div class="field-error-code">
-            <label for="errorCode">Error Status Code (optional)</label>
-            <input id="errorCode" class="compact-input" type="number" min="1" value="500" />
-          </div>
+            <div class="field-error-code">
+              <label for="errorCode">Error Code (optional)</label>
+              <input id="errorCode" type="number" min="1" value="500" />
+            </div>
 
-          <div class="field-error-message">
-            <label for="errorMessage">Error Message</label>
-            <input id="errorMessage" type="text" value="Service unavailable (simulated)" />
-          </div>
+            <div class="field-error-message">
+              <label for="errorMessage">Error Message</label>
+              <input id="errorMessage" type="text" value="Service unavailable (simulated)" />
+            </div>
 
-          <div class="full form-actions">
-            <button class="alt" id="suggestBtn" type="button">Suggest Free Port</button>
-            <button type="submit">Create Simulation</button>
-          </div>
+            <div class="full form-actions">
+              <button class="alt" id="suggestBtn" type="button">Suggest Free Port</button>
+              <button type="submit">Create Simulation</button>
+            </div>
           </form>
           <div id="formError"></div>
         </div>
       </div>
 
-      <div class="panel" style="margin-top: 14px">
+      <!-- ── Running Simulations ───────────────────────────────── -->
+      <div class="panel">
         <div class="panel-header">
           <h3>Running Simulations</h3>
           <button type="button" class="panel-toggle" data-panel-toggle="runningPanelBody">Minimize</button>
         </div>
         <div id="runningPanelBody" class="panel-body">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Port</th>
-                <th>Simulated Endpoint</th>
-                <th>Live URL</th>
-                <th>State</th>
-                <th>PID</th>
-                <th>
-                  <span class="show-toggle">
-                    <input id="toggleAllTerminals" type="checkbox" title="Select/Unselect all terminals" />
-                    Show terminal
-                  </span>
-                </th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="simRows"></tbody>
-          </table>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Port</th>
+                  <th>Simulated Endpoint</th>
+                  <th>Live URL</th>
+                  <th>State</th>
+                  <th>PID</th>
+                  <th>
+                    <span class="show-toggle">
+                      <input id="toggleAllTerminals" type="checkbox" title="Select/Unselect all terminals" />
+                      Terminal
+                    </span>
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="simRows"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <div class="panel" style="margin-top: 14px">
+      <!-- ── Terminal Views ─────────────────────────────────────── -->
+      <div class="panel">
         <div class="panel-header">
           <div class="terminal-toolbar-left">
-
             <h3>Terminal Views</h3>
             <div class="terminal-size-controls">
-              <button type="button" id="terminalHeightDec" title="Decrease terminal height">-</button>
-              <span>Terminal Height</span>
+              <button type="button" id="terminalHeightDec" title="Decrease terminal height">−</button>
+              <span>Height</span>
               <button type="button" id="terminalHeightInc" title="Increase terminal height">+</button>
             </div>
           </div>
@@ -460,6 +735,7 @@
           <div id="terminalDeck" class="terminal-grid"></div>
         </div>
       </div>
+
       <p class="footer-note">
         Copyright &copy; 2026
         <strong>
@@ -625,13 +901,20 @@
         toggleAllTerminals.indeterminate = selectedCount > 0 && selectedCount < total;
       }
 
+      function stateBadge(state) {
+        const el = document.createElement("span");
+        el.className = `state-badge state-${state}`;
+        el.textContent = state;
+        return el;
+      }
+
       function renderTerminalDeck() {
         terminalDeck.innerHTML = "";
 
         if (!checkedTerminalIds.length) {
           const empty = document.createElement("div");
           empty.className = "terminal-empty";
-          empty.textContent = "Check 'Show terminal' for a simulation to see its logs.";
+          empty.textContent = "Check 'Terminal' for a simulation to see its logs.";
           terminalDeck.appendChild(empty);
           return;
         }
@@ -780,11 +1063,14 @@
             <td>${sim.port}</td>
             <td title="${getSimulatedEndpoint(sim)}">${getSimulatedEndpoint(sim)}</td>
             <td title="${sim.simulateUrl}">${sim.simulateUrl.slice(0, 50)}</td>
-            <td>${sim.state}</td>
+            <td class="state-cell"></td>
             <td>${sim.pid ?? "-"}</td>
             <td class="show-cell"></td>
             <td class="actions"></td>
           `;
+
+          // Render state badge
+          tr.querySelector(".state-cell").appendChild(stateBadge(sim.state));
 
           const showCell = tr.querySelector("td.show-cell");
           const actionCell = tr.querySelector("td.actions");
