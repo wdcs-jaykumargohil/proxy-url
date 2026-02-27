@@ -609,10 +609,37 @@ function rewriteWebsiteBody(content, req) {
 
 function shouldRewriteWebsiteResponse(req) {
   if (req.method !== "GET") return false;
-  const accept = String(req.headers.accept || "").toLowerCase();
-  if (accept.includes("text/html")) return true;
   const pathname = String(req.path || "").toLowerCase();
-  return pathname.endsWith(".css");
+  // API/RPC style routes should never go through HTML/CSS rewrite proxy.
+  if (pathname.startsWith("/rpc/") || pathname.startsWith("/api/")) return false;
+
+  if (pathname.endsWith(".css")) return true;
+
+  const accept = String(req.headers.accept || "").toLowerCase();
+  // Keep HTML rewrite limited to likely website/document requests.
+  if (!accept.includes("text/html")) return false;
+
+  // Typical web document/static paths.
+  if (
+    pathname === "/" ||
+    pathname.endsWith(".html") ||
+    pathname.endsWith(".htm") ||
+    pathname.endsWith(".js") ||
+    pathname.endsWith(".mjs") ||
+    pathname.endsWith(".map") ||
+    pathname.endsWith(".svg") ||
+    pathname.endsWith(".png") ||
+    pathname.endsWith(".jpg") ||
+    pathname.endsWith(".jpeg") ||
+    pathname.endsWith(".gif") ||
+    pathname.endsWith(".ico") ||
+    pathname.endsWith(".woff") ||
+    pathname.endsWith(".woff2")
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 const simulationStreamProxy = createProxyMiddleware({
