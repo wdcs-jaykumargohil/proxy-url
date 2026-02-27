@@ -45,6 +45,7 @@
         --bg-glow-a:   rgba(0,212,170,.06);
         --bg-glow-b:   rgba(59,130,246,.05);
         --terminal-log-bg: #0b0d12;
+        --input-focus-bg: #0d1118;
 
         --page-x: clamp(14px,3vw,28px);
         --page-y: 22px;
@@ -89,6 +90,7 @@
         --bg-glow-a:   rgba(14,165,127,.14);
         --bg-glow-b:   rgba(59,130,246,.12);
         --terminal-log-bg: #0f172a;
+        --input-focus-bg: #f7fbff;
       }
 
       body {
@@ -367,15 +369,15 @@
         font-size: 13px; font-family: var(--font-sans);
         color: var(--text);
         transition: border-color .15s, box-shadow .15s, background .15s;
-        outline: none; appearance: auto; color-scheme: dark;
+        outline: none; appearance: auto; color-scheme: inherit;
       }
       input:not([type="checkbox"]):not([type="radio"]):focus, select:focus {
         border-color: var(--accent);
-        background: #0d1118;
+        background: var(--input-focus-bg);
         box-shadow: 0 0 0 3px rgba(0,212,170,.12);
       }
       input::placeholder { color: var(--text-dim); }
-      select option { background: #141720; }
+      select option { background: var(--surface); }
 
       label {
         display: block;
