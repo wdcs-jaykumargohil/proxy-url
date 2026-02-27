@@ -1513,6 +1513,7 @@
       ─────────────────────────────────────────────────────── */
       let   _sseSource       = null;
       let   _sseStaleTimer   = null;
+      let   _sseSubscribedIdsKey = "";
       const SSE_STALE_MS     = 20_000; // reconnect if no event for 20s
 
       function _sseUrl(replayBacklog = true) {
@@ -1544,6 +1545,7 @@
           _sseSource.close();
           _sseSource = null;
         }
+        _sseSubscribedIdsKey = "";
         markAllCheckedTerminalsOffline();
       }
 
@@ -1558,6 +1560,7 @@
 
         const src = new EventSource(_sseUrl(replayBacklog));
         _sseSource = src;
+        _sseSubscribedIdsKey = checkedTerminalIds.slice().sort().join(",");
         markAllCheckedTerminalsOffline();
         _resetStaleTimer(); // start stale watchdog
 
@@ -1602,10 +1605,13 @@
 
       /* Call this whenever checkedTerminalIds changes */
       function syncSseSubscription() {
+        const nextIdsKey = checkedTerminalIds.slice().sort().join(",");
         if (!checkedTerminalIds.length) {
           _closeSse(); // req 5: disconnect when nothing is checked
           return;
         }
+        // Keep existing healthy stream if subscribed ids are unchanged.
+        if (_sseSource && _sseSubscribedIdsKey === nextIdsKey) return;
         // Resubscribe with new id set without replaying backlog to avoid duplicates
         _reconnectSse(false, false);
       }
