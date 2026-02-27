@@ -16,10 +16,12 @@ const MAX_PORT = 65535;
 const DEFAULT_ERROR_STATUS = 500;
 const DEFAULT_ERROR_MESSAGE = "Service unavailable (simulated)";
 const DEFAULT_MAX_REQUESTS_PER_SECOND = 15;
+const SSE_DEBUG = process.env.SSE_DEBUG === "1";
 
 const simulations = new Map();
 const logClients = new Set();
 let seq = 1;
+let sseClientSeq = 1;
 
 const jsonParser = express.json();
 app.use((req, res, next) => {
@@ -87,6 +89,12 @@ function buildManagerProxyEndpoint(sim, req) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function sseDebug(message, meta) {
+  if (!SSE_DEBUG) return;
+  if (meta !== undefined) console.log(`[SSE-SRV ${nowIso()}] ${message}`, meta);
+  else console.log(`[SSE-SRV ${nowIso()}] ${message}`);
 }
 
 function isAdminRequest(req) {
@@ -423,9 +431,14 @@ app.get("/api/ports/suggest", async (req, res) => {
 });
 
 app.get("/api/logs/stream", (req, res) => {
+  const clientId = `sse-${sseClientSeq}`;
+  sseClientSeq += 1;
+  const connectedAt = Date.now();
+
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   // Parse optional ids filter: ?ids=sim-1,sim-2
@@ -438,6 +451,20 @@ app.get("/api/logs/stream", (req, res) => {
     Number.isInteger(rawBacklog) && rawBacklog >= 0
       ? Math.min(rawBacklog, 300)
       : 50;
+  const userId = getRequestUserId(req);
+  const isAdmin = isAdminRequest(req);
+  sseDebug("client connected", {
+    clientId,
+    isAdmin,
+    userId,
+    ids: filterIds ? Array.from(filterIds) : [],
+    backlogLimit,
+    ip:
+      req.headers["x-forwarded-for"] ||
+      req.socket?.remoteAddress ||
+      "unknown",
+    ua: req.headers["user-agent"] || "",
+  });
 
   const backlog = [];
   for (const sim of simulations.values()) {
@@ -450,6 +477,10 @@ app.get("/api/logs/stream", (req, res) => {
   for (const entry of backlog) {
     res.write(`data: ${JSON.stringify(entry)}\n\n`);
   }
+  sseDebug("backlog sent", {
+    clientId,
+    entries: backlog.length,
+  });
 
   const initialHeartbeatIds = [];
   for (const sim of simulations.values()) {
@@ -467,9 +498,10 @@ app.get("/api/logs/stream", (req, res) => {
 
   const client = {
     res,
-    isAdmin: isAdminRequest(req),
-    userId: getRequestUserId(req),
+    isAdmin,
+    userId,
     ids: filterIds, // Set<string> or null
+    clientId,
   };
   logClients.add(client);
 
@@ -483,23 +515,42 @@ app.get("/api/logs/stream", (req, res) => {
     return ids;
   }
 
-  // Send per-terminal heartbeat every 15s so client can track stream health by id
+  let keepaliveTicks = 0;
+  // Send per-terminal heartbeat every 5s to survive proxy idle/buffering.
   const keepalive = setInterval(() => {
     try {
+      keepaliveTicks += 1;
       const heartbeat = {
         type: "heartbeat",
         ids: getHeartbeatIds(),
         at: nowIso(),
       };
       res.write(`data: ${JSON.stringify(heartbeat)}\n\n`);
-    } catch {
+      if (keepaliveTicks <= 3 || keepaliveTicks % 12 === 0) {
+        sseDebug("heartbeat sent", {
+          clientId,
+          tick: keepaliveTicks,
+          ids: heartbeat.ids,
+        });
+      }
+    } catch (error) {
+      sseDebug("heartbeat write failed", {
+        clientId,
+        tick: keepaliveTicks,
+        error: error?.message || String(error),
+      });
       clearInterval(keepalive);
     }
-  }, 15000);
+  }, 5000);
 
   req.on("close", () => {
     clearInterval(keepalive);
     logClients.delete(client);
+    sseDebug("client disconnected", {
+      clientId,
+      connectedForMs: Date.now() - connectedAt,
+      heartbeatsSent: keepaliveTicks,
+    });
   });
 });
 
