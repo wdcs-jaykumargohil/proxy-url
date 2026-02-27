@@ -42,6 +42,9 @@
 
         --shadow-sm:   0 1px 2px rgba(0,0,0,.3);
         --shadow-glow: 0 0 20px rgba(0,212,170,.12);
+        --bg-glow-a:   rgba(0,212,170,.06);
+        --bg-glow-b:   rgba(59,130,246,.05);
+        --terminal-log-bg: #0b0d12;
 
         --page-x: clamp(14px,3vw,28px);
         --page-y: 22px;
@@ -60,6 +63,33 @@
       ═══════════════════════════════════════════════════════════ */
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       html { color-scheme: dark; }
+      :root[data-theme="light"] { color-scheme: light; }
+      :root[data-theme="light"] {
+        --bg:          #f3f6fb;
+        --bg-alt:      #ffffff;
+        --surface:     #fdfefe;
+        --surface-2:   #f1f4fa;
+        --surface-3:   #e8edf7;
+        --border:      #ccd6e5;
+        --border-soft: #dde5f2;
+
+        --text:        #1f293b;
+        --text-muted:  #4b5c79;
+        --text-dim:    #697a9a;
+
+        --accent:      #0ea57f;
+        --accent-dim:  rgba(14,165,127,.1);
+        --accent-dark: #0b8c6c;
+
+        --green-bg:    rgba(34,197,94,.12);
+        --red-bg:      rgba(240,79,58,.14);
+        --blue-bg:     rgba(59,130,246,.13);
+        --shadow-sm:   0 1px 2px rgba(15,23,42,.08);
+        --shadow-glow: 0 0 16px rgba(14,165,127,.18);
+        --bg-glow-a:   rgba(14,165,127,.14);
+        --bg-glow-b:   rgba(59,130,246,.12);
+        --terminal-log-bg: #0f172a;
+      }
 
       body {
         margin: 0;
@@ -71,8 +101,8 @@
         color: var(--text);
         background-color: var(--bg);
         background-image:
-          radial-gradient(ellipse 70% 40% at 0% 0%, rgba(0,212,170,.06) 0%, transparent 60%),
-          radial-gradient(ellipse 50% 50% at 100% 100%, rgba(59,130,246,.05) 0%, transparent 60%);
+          radial-gradient(ellipse 70% 40% at 0% 0%, var(--bg-glow-a) 0%, transparent 60%),
+          radial-gradient(ellipse 50% 50% at 100% 100%, var(--bg-glow-b) 0%, transparent 60%);
         background-attachment: fixed;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
@@ -142,6 +172,18 @@
       }
 
       .topbar-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .theme-toggle {
+        width: 32px; height: 32px; padding: 0;
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-muted);
+      }
+      .theme-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+      .theme-icon { font-size: 14px; line-height: 1; }
+      .theme-icon-sun { display: none; }
+      .theme-icon-moon { display: inline; }
+      :root[data-theme="light"] .theme-icon-sun { display: inline; }
+      :root[data-theme="light"] .theme-icon-moon { display: none; }
 
       .meta-chip {
         display: inline-flex; align-items: center; gap: 5px;
@@ -244,6 +286,16 @@
         font-weight: 600; border-color: var(--accent);
       }
       .btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); box-shadow: 0 0 14px rgba(0,212,170,.3); }
+      :root:not([data-theme="light"]) .form-actions .btn-primary {
+        background: #10b38f;
+        border-color: #10b38f;
+        color: #06231c;
+      }
+      :root:not([data-theme="light"]) .form-actions .btn-primary:hover {
+        background: #0f9d7d;
+        border-color: #0f9d7d;
+        box-shadow: none;
+      }
 
       /* Secondary (Suggest Port) */
       .btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
@@ -306,7 +358,7 @@
       /* ═══════════════════════════════════════════════════════════
          INPUTS / SELECT
       ═══════════════════════════════════════════════════════════ */
-      input, select {
+      input:not([type="checkbox"]):not([type="radio"]), select {
         width: 100%;
         background: var(--bg-alt, #0f1117);
         border: 1px solid var(--border);
@@ -317,7 +369,7 @@
         transition: border-color .15s, box-shadow .15s, background .15s;
         outline: none; appearance: auto; color-scheme: dark;
       }
-      input:focus, select:focus {
+      input:not([type="checkbox"]):not([type="radio"]):focus, select:focus {
         border-color: var(--accent);
         background: #0d1118;
         box-shadow: 0 0 0 3px rgba(0,212,170,.12);
@@ -573,7 +625,7 @@
         overflow-y: auto; overflow-x: hidden;
         padding: 10px 14px;
         font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7;
-        color: #7a9e92; background: var(--bg);
+        color: #7a9e92; background: var(--terminal-log-bg);
         flex-shrink: 0; /* keep the defined height */
       }
       .terminal-body::-webkit-scrollbar { width: 4px; }
@@ -638,7 +690,8 @@
         :root { --page-x: 12px; --page-y: 14px; }
 
         .topbar { padding-bottom: 12px; }
-        .brand-text p, .topbar-meta { display: none; }
+        .brand-text p { display: none; }
+        .topbar-meta .meta-chip { display: none; }
 
         .panel-body, .panel-body-flush { padding: 12px; }
         .panel-body-flush { padding: 0; }
@@ -684,6 +737,10 @@
           <div class="meta-chip"><span class="dot"></span>Live</div>
           <div class="meta-chip">HTTP &amp; WS</div>
           <div class="meta-chip">Break / Fix</div>
+          <button type="button" id="themeToggle" class="theme-toggle" aria-label="Switch to light mode" title="Switch to light mode">
+            <span class="theme-icon theme-icon-sun">☀</span>
+            <span class="theme-icon theme-icon-moon">🌙</span>
+          </button>
         </div>
       </div>
 
@@ -844,6 +901,7 @@
       const terminalHeightDec  = document.getElementById("terminalHeightDec");
       const terminalHeightInc  = document.getElementById("terminalHeightInc");
       const terminalHeightVal  = document.getElementById("terminalHeightVal");
+      const themeToggle        = document.getElementById("themeToggle");
       const panelToggles       = document.querySelectorAll("[data-panel-toggle]");
       const layoutButtons      = document.querySelectorAll(".layout-controls button[data-cols]");
 
@@ -856,6 +914,7 @@
       const terminalColsStorageKey          = "proxy_sim_terminal_cols";
       const panelStateStorageKey            = "proxy_sim_panel_state";
       const terminalHeightStorageKeyBase    = "proxy_sim_terminal_height";
+      const themeStorageKey                 = "proxy_sim_theme";
 
       const checkedTerminalIds = [];
       const terminalBuffers    = new Map();
@@ -931,6 +990,31 @@
       }
 
       /* ── Terminal layout columns ────────────────────────────── */
+      function applyTheme(theme) {
+        const normalized = theme === "light" ? "light" : "dark";
+        document.documentElement.dataset.theme = normalized;
+        if (!themeToggle) return;
+        const next = normalized === "dark" ? "light" : "dark";
+        themeToggle.setAttribute("aria-label", `Switch to ${next} mode`);
+        themeToggle.title = `Switch to ${next} mode`;
+      }
+
+      function initTheme() {
+        const saved = localStorage.getItem(themeStorageKey);
+        if (saved === "dark" || saved === "light") {
+          applyTheme(saved);
+          return;
+        }
+        applyTheme("dark");
+      }
+
+      function toggleTheme() {
+        const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+        const next = current === "dark" ? "light" : "dark";
+        applyTheme(next);
+        localStorage.setItem(themeStorageKey, next);
+      }
+
       function setTerminalColumns(cols) {
         const value = [1, 2, 3, 4].includes(cols) ? cols : 2;
         document.documentElement.style.setProperty("--terminal-cols", String(value));
@@ -1397,6 +1481,7 @@
       /* ── Terminal height +/- ────────────────────────────────── */
       terminalHeightDec.addEventListener("click", () => adjustTerminalHeight(-30));
       terminalHeightInc.addEventListener("click", () => adjustTerminalHeight(30));
+      if (themeToggle) themeToggle.addEventListener("click", toggleTheme);
 
       /* ── Panel collapse toggles ─────────────────────────────── */
       const panelState = loadPanelState();
@@ -1543,6 +1628,7 @@
       const savedCols   = Number(localStorage.getItem(terminalColsStorageKey) || "2");
       const savedHeight = Number(localStorage.getItem(terminalHeightStorageKey) || "210");
 
+      initTheme();
       setTerminalColumns(savedCols);
       setTerminalHeight(savedHeight);   /* also updates the readout label */
       loadCheckedTerminalIds();
